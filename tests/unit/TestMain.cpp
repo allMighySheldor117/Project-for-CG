@@ -15,6 +15,7 @@
 #include "crystalbound/Camera.hpp"
 #include "crystalbound/MeshData.hpp"
 #include "crystalbound/ObjLoader.hpp"
+#include "GeometryTests.hpp"
 #include "GenerationTests.hpp"
 
 namespace {
@@ -358,6 +359,9 @@ int main(const int argument_count, char* arguments[])
     const std::vector<TestCase> generation_tests{
         crystalbound::test::generation_test_cases()};
     tests.insert(tests.end(), generation_tests.begin(), generation_tests.end());
+    const std::vector<TestCase> geometry_tests{
+        crystalbound::test::geometry_test_cases()};
+    tests.insert(tests.end(), geometry_tests.begin(), geometry_tests.end());
 
     std::size_t failures{};
     for (const TestCase& test : tests) {

@@ -13,8 +13,9 @@ namespace crystalbound {
 namespace {
 
 static_assert(std::is_standard_layout_v<Vertex>);
-static_assert(sizeof(Vertex) == 6 * sizeof(float));
+static_assert(sizeof(Vertex) == 8 * sizeof(float));
 static_assert(offsetof(Vertex, normal) == 3 * sizeof(float));
+static_assert(offsetof(Vertex, texture_coordinates) == 6 * sizeof(float));
 
 #if !defined(NDEBUG)
 void require_no_opengl_error()
@@ -81,6 +82,14 @@ GpuMesh::GpuMesh(const MeshData& mesh)
             static_cast<GLsizei>(sizeof(Vertex)),
             reinterpret_cast<const void*>(offsetof(Vertex, normal)));
         glEnableVertexAttribArray(1);
+        glVertexAttribPointer(
+            2,
+            2,
+            GL_FLOAT,
+            GL_FALSE,
+            static_cast<GLsizei>(sizeof(Vertex)),
+            reinterpret_cast<const void*>(offsetof(Vertex, texture_coordinates)));
+        glEnableVertexAttribArray(2);
 
         index_count_ = static_cast<int>(mesh.indices.size());
 #if !defined(NDEBUG)

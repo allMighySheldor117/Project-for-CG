@@ -83,11 +83,15 @@ add_library(crystalbound_core STATIC
     src/DeterministicRandom.cpp
     src/Generation.cpp
     src/GenerationTypes.cpp
+    src/GeometryFingerprint.cpp
+    src/GeometryMesh.cpp
+    src/GeometryValidation.cpp
     src/MeshData.cpp
     src/ObjLoader.cpp
     src/TopologyFingerprint.cpp
     src/TopologyGeneration.cpp
     src/TopologyValidation.cpp
+    src/SplineGeometry.cpp
 )
 target_compile_features(crystalbound_core PUBLIC cxx_std_17)
 set_target_properties(crystalbound_core PROPERTIES
@@ -162,6 +166,7 @@ if(CRYSTALBOUND_BUILD_TESTS)
     enable_testing()
 
     add_executable(crystalbound_tests
+        tests/unit/GeometryTests.cpp
         tests/unit/GenerationTests.cpp
         tests/unit/TestMain.cpp
     )

@@ -28,7 +28,9 @@ void validate_mesh_data(const MeshData& mesh)
 
     constexpr float unit_normal_tolerance{1.0e-3F};
     for (const Vertex& vertex : mesh.vertices) {
-        if (!finite_vector(vertex.position) || !finite_vector(vertex.normal)) {
+        if (!finite_vector(vertex.position) || !finite_vector(vertex.normal)
+            || !std::isfinite(vertex.texture_coordinates[0])
+            || !std::isfinite(vertex.texture_coordinates[1])) {
             throw std::invalid_argument("Mesh contains a non-finite vertex attribute.");
         }
         const float squared_length = vertex.normal[0] * vertex.normal[0]

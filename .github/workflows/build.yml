@@ -1,0 +1,108 @@
+name: Build and test
+
+on:
+  push:
+    branches:
+      - main
+      - "feature/**"
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  repository-policy:
+    name: Repository policy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Reject tracked AI workspace files
+        shell: bash
+        run: |
+          tracked_plans="$(git ls-files plans)"
+          if [[ -n "$tracked_plans" ]]; then
+            echo "The local plans/ workspace must never be tracked:"
+            echo "$tracked_plans"
+            exit 1
+          fi
+
+      - name: Reject configure-time project downloads
+        shell: bash
+        run: |
+          pattern='FetchContent|ExternalProject_Add|file[[:space:]]*\([[:space:]]*DOWNLOAD|GIT_REPOSITORY'
+          if git grep -n -E "$pattern" -- CMakeLists.txt '*.cmake'; then
+            echo "Project CMake files must not download dependencies."
+            exit 1
+          fi
+
+  windows:
+    name: Windows / Visual Studio 2022
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build/ci-windows
+          -G "Visual Studio 17 2022" -A x64
+          -DCRYSTALBOUND_BUILD_TESTS=ON
+
+      - name: Build
+        run: >-
+          cmake --build build/ci-windows --config Debug
+          --target crystalbound crystalbound_tests
+
+      - name: Test
+        run: >-
+          ctest --test-dir build/ci-windows -C Debug
+          --output-on-failure
+
+      - name: Install
+        run: >-
+          cmake --install build/ci-windows --config Debug
+          --prefix build/install-windows
+
+  linux:
+    name: Linux / Ninja
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install system prerequisites
+        run: >-
+          sudo apt-get update &&
+          sudo apt-get install -y
+          ninja-build
+          libx11-dev
+          libxrandr-dev
+          libxinerama-dev
+          libxcursor-dev
+          libxi-dev
+          libgl1-mesa-dev
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build/ci-linux -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCRYSTALBOUND_BUILD_TESTS=ON
+
+      - name: Build
+        run: >-
+          cmake --build build/ci-linux
+          --target crystalbound crystalbound_tests
+
+      - name: Test
+        run: >-
+          ctest --test-dir build/ci-linux
+          --output-on-failure
+
+      - name: Install
+        run: >-
+          cmake --install build/ci-linux
+          --prefix build/install-linux

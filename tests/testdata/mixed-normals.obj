@@ -1,0 +1,7 @@
+# Partial normal coverage is deliberately ambiguous and must fail.
+o MixedNormals
+v -1 -1 0
+v 1 -1 0
+v 0 1 0
+vn 0 0 1
+f 1//1 2 3//1

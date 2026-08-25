@@ -1,4 +1,4 @@
-#include "npr/ObjLoader.hpp"
+#include "crystalbound/ObjLoader.hpp"
 
 #include <algorithm>
 #include <array>
@@ -16,7 +16,7 @@
 
 #include <tiny_obj_loader.h>
 
-namespace npr {
+namespace crystalbound {
 namespace {
 
 struct Vector3d {
@@ -516,4 +516,4 @@ ModelLoadResult load_obj(const std::filesystem::path& path)
     return result;
 }
 
-}  // namespace npr
+}  // namespace crystalbound

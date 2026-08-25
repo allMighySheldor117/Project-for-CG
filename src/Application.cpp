@@ -1,4 +1,4 @@
-#include "npr/Application.hpp"
+#include "crystalbound/Application.hpp"
 
 #include <algorithm>
 #include <filesystem>
@@ -14,12 +14,12 @@
 #include <GLFW/glfw3.h>
 #include <glm/mat4x4.hpp>
 
-#include "npr/GpuMesh.hpp"
-#include "npr/ObjLoader.hpp"
-#include "npr/ResourcePaths.hpp"
-#include "npr/ShaderProgram.hpp"
+#include "crystalbound/GpuMesh.hpp"
+#include "crystalbound/ObjLoader.hpp"
+#include "crystalbound/ResourcePaths.hpp"
+#include "crystalbound/ShaderProgram.hpp"
 
-namespace npr {
+namespace crystalbound {
 namespace {
 
 constexpr int initial_window_width{1280};
@@ -191,7 +191,7 @@ void Application::initialize_window()
     window_ = glfwCreateWindow(
         initial_window_width,
         initial_window_height,
-        "Real-Time NPR Renderer - Model Pipeline",
+        "Crystalbound - Development Model Pipeline",
         nullptr,
         nullptr);
     if (window_ == nullptr) {
@@ -375,4 +375,4 @@ void Application::key_callback(
     }
 }
 
-}  // namespace npr
+}  // namespace crystalbound

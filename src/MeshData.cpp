@@ -1,10 +1,10 @@
-#include "npr/MeshData.hpp"
+#include "crystalbound/MeshData.hpp"
 
 #include <cmath>
 #include <limits>
 #include <stdexcept>
 
-namespace npr {
+namespace crystalbound {
 namespace {
 
 [[nodiscard]] bool finite_vector(const std::array<float, 3>& value)
@@ -46,4 +46,4 @@ void validate_mesh_data(const MeshData& mesh)
     }
 }
 
-}  // namespace npr
+}  // namespace crystalbound

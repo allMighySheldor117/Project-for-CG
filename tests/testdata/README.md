@@ -1,12 +1,12 @@
 # OBJ loader fixtures
 
-These small, hand-authored files define the CPU loader cases that automated
-tests will exercise in Blueprint Step 4. Step 3 intentionally adds no test
-target.
+These small, hand-authored files define the CPU loader cases exercised by the
+`crystalbound_tests` CTest target.
 
 | Fixture | Intended result |
 | --- | --- |
 | `valid.obj` | Loads a triangle with complete normals. |
+| `unnormalized-normals.obj` | Normalizes complete supplied normal data. |
 | `split-indices.obj` | Preserves independent position and normal indices. |
 | `hard-edges.obj` | Duplicates shared positions when their normal indices differ. |
 | `no-normals.obj` | Generates area-weighted, unit-length vertex normals. |

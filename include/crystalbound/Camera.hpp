@@ -3,7 +3,7 @@
 #include <glm/mat4x4.hpp>
 #include <glm/vec3.hpp>
 
-namespace npr {
+namespace crystalbound {
 
 struct CameraMovementInput {
     float forward{};
@@ -34,4 +34,4 @@ private:
     float pitch_degrees_{};
 };
 
-}  // namespace npr
+}  // namespace crystalbound

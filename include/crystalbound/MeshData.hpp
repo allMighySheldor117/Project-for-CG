@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace npr {
+namespace crystalbound {
 
 struct Vertex {
     std::array<float, 3> position{};
@@ -18,4 +18,4 @@ struct MeshData {
 
 void validate_mesh_data(const MeshData& mesh);
 
-}  // namespace npr
+}  // namespace crystalbound

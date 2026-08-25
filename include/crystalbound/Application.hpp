@@ -4,11 +4,11 @@
 #include <memory>
 #include <optional>
 
-#include "npr/Camera.hpp"
+#include "crystalbound/Camera.hpp"
 
 struct GLFWwindow;
 
-namespace npr {
+namespace crystalbound {
 
 class Application {
 public:
@@ -56,4 +56,4 @@ private:
     std::unique_ptr<RenderResources> render_resources_{};
 };
 
-}  // namespace npr
+}  // namespace crystalbound

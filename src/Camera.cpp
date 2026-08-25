@@ -1,4 +1,4 @@
-#include "npr/Camera.hpp"
+#include "crystalbound/Camera.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -8,7 +8,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/trigonometric.hpp>
 
-namespace npr {
+namespace crystalbound {
 namespace {
 
 constexpr float movement_speed{2.5F};
@@ -90,4 +90,4 @@ void Camera::update_basis()
     up_ = glm::normalize(glm::cross(right_, front_));
 }
 
-}  // namespace npr
+}  // namespace crystalbound

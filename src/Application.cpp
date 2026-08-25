@@ -167,7 +167,7 @@ void Application::initialize_window()
     window_ = glfwCreateWindow(
         initial_window_width,
         initial_window_height,
-        "Crystalbound - Deterministic Topology Development",
+        "Crystalbound - Spline and Mesh Contract Development",
         nullptr,
         nullptr);
     if (window_ == nullptr) {

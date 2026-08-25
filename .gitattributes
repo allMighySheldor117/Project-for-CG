@@ -1,0 +1,2 @@
+# Keep vendored text deterministic without policing upstream whitespace style.
+third_party/** text eol=lf whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab

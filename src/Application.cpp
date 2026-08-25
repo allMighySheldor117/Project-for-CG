@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <filesystem>
 #include <iostream>
-#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -57,14 +56,6 @@ void require_no_opengl_error(const char* operation)
 }
 #endif
 
-[[nodiscard]] std::filesystem::path absolute_for_diagnostics(
-    const std::filesystem::path& path)
-{
-    std::error_code error;
-    const std::filesystem::path absolute = std::filesystem::absolute(path, error);
-    return error ? path : absolute;
-}
-
 void print_model_warnings(
     const std::filesystem::path& path,
     const std::vector<std::string>& warnings)
@@ -75,23 +66,8 @@ void print_model_warnings(
 }
 
 [[nodiscard]] MeshData load_model(
-    const std::optional<std::filesystem::path>& requested_path,
     const std::filesystem::path& bundled_path)
 {
-    if (requested_path.has_value()) {
-        const std::filesystem::path custom_path = absolute_for_diagnostics(*requested_path);
-        try {
-            ModelLoadResult result = load_obj(custom_path);
-            print_model_warnings(custom_path, result.warnings);
-            std::cout << "Loaded custom model: " << custom_path.u8string() << '\n';
-            return std::move(result.mesh);
-        } catch (const ModelLoadError& error) {
-            std::cerr << "Custom model failed; using bundled Suzanne.\n"
-                      << "  Path: " << custom_path.u8string() << '\n'
-                      << "  Reason: " << error.what() << '\n';
-        }
-    }
-
     ModelLoadResult result;
     try {
         result = load_obj(bundled_path);
@@ -138,8 +114,8 @@ private:
 #endif
 };
 
-Application::Application(std::optional<std::filesystem::path> model_path)
-    : model_path_(std::move(model_path))
+Application::Application(GenerationResult generation)
+    : generation_(std::move(generation))
 {
 }
 
@@ -159,7 +135,7 @@ int Application::run()
 void Application::initialize()
 {
     const std::filesystem::path resources = resource_root();
-    const MeshData model = load_model(model_path_, resources / "assets/models/suzanne.obj");
+    const MeshData model = load_model(resources / "assets/models/suzanne.obj");
 
     initialize_window();
     initialize_opengl();
@@ -191,7 +167,7 @@ void Application::initialize_window()
     window_ = glfwCreateWindow(
         initial_window_width,
         initial_window_height,
-        "Crystalbound - Development Model Pipeline",
+        "Crystalbound - Deterministic Topology Development",
         nullptr,
         nullptr);
     if (window_ == nullptr) {

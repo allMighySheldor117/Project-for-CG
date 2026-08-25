@@ -1,10 +1,9 @@
 #pragma once
 
-#include <filesystem>
 #include <memory>
-#include <optional>
 
 #include "crystalbound/Camera.hpp"
+#include "crystalbound/Generation.hpp"
 
 struct GLFWwindow;
 
@@ -12,7 +11,7 @@ namespace crystalbound {
 
 class Application {
 public:
-    explicit Application(std::optional<std::filesystem::path> model_path = std::nullopt);
+    explicit Application(GenerationResult generation);
     ~Application();
 
     Application(const Application&) = delete;
@@ -52,7 +51,7 @@ private:
     int framebuffer_width_{};
     int framebuffer_height_{};
     Camera camera_{};
-    std::optional<std::filesystem::path> model_path_{};
+    GenerationResult generation_{};
     std::unique_ptr<RenderResources> render_resources_{};
 };
 

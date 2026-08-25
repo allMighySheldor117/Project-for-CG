@@ -79,8 +79,15 @@ target_link_libraries(tinyobjloader_impl
 
 add_library(crystalbound_core STATIC
     src/Camera.cpp
+    src/CommandLine.cpp
+    src/DeterministicRandom.cpp
+    src/Generation.cpp
+    src/GenerationTypes.cpp
     src/MeshData.cpp
     src/ObjLoader.cpp
+    src/TopologyFingerprint.cpp
+    src/TopologyGeneration.cpp
+    src/TopologyValidation.cpp
 )
 target_compile_features(crystalbound_core PUBLIC cxx_std_17)
 set_target_properties(crystalbound_core PROPERTIES
@@ -155,6 +162,7 @@ if(CRYSTALBOUND_BUILD_TESTS)
     enable_testing()
 
     add_executable(crystalbound_tests
+        tests/unit/GenerationTests.cpp
         tests/unit/TestMain.cpp
     )
     target_compile_features(crystalbound_tests PRIVATE cxx_std_17)

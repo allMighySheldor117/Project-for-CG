@@ -15,6 +15,7 @@
 #include "crystalbound/Camera.hpp"
 #include "crystalbound/MeshData.hpp"
 #include "crystalbound/ObjLoader.hpp"
+#include "GenerationTests.hpp"
 
 namespace {
 
@@ -22,6 +23,7 @@ using crystalbound::MeshData;
 using crystalbound::ModelLoadError;
 using crystalbound::ModelLoadResult;
 using crystalbound::Vertex;
+using crystalbound::test::TestCase;
 
 constexpr float tolerance{1.0e-5F};
 
@@ -322,11 +324,6 @@ void camera_movement_is_delta_time_based(const std::filesystem::path&)
     }
 }
 
-struct TestCase {
-    std::string_view name;
-    void (*function)(const std::filesystem::path&);
-};
-
 }  // namespace
 
 int main(const int argument_count, char* arguments[])
@@ -342,7 +339,7 @@ int main(const int argument_count, char* arguments[])
         return 2;
     }
 
-    const std::vector<TestCase> tests{
+    std::vector<TestCase> tests{
         {"valid OBJ loads", valid_obj_loads},
         {"complete supplied normals are normalized", complete_normals_are_normalized},
         {"split OBJ indices are preserved", split_indices_are_preserved},
@@ -358,6 +355,9 @@ int main(const int argument_count, char* arguments[])
         {"camera rejects invalid projection", camera_rejects_invalid_projection},
         {"camera movement is delta-time based", camera_movement_is_delta_time_based},
     };
+    const std::vector<TestCase> generation_tests{
+        crystalbound::test::generation_test_cases()};
+    tests.insert(tests.end(), generation_tests.begin(), generation_tests.end());
 
     std::size_t failures{};
     for (const TestCase& test : tests) {

@@ -23,6 +23,11 @@ constexpr bool operator==(const IntegerPoint3& left, const IntegerPoint3& right)
         && left.z_millimetres == right.z_millimetres;
 }
 
+constexpr bool operator!=(const IntegerPoint3& left, const IntegerPoint3& right) noexcept
+{
+    return !(left == right);
+}
+
 struct GeometryVector3 {
     double x{};
     double y{};

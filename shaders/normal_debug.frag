@@ -2,9 +2,12 @@
 
 in vec3 normal_color;
 
+uniform vec3 u_albedo;
+
 out vec4 fragment_color;
 
 void main()
 {
-    fragment_color = vec4(normal_color, 1.0);
+    vec3 debug_color = mix(u_albedo, normal_color, 0.38);
+    fragment_color = vec4(debug_color, 1.0);
 }

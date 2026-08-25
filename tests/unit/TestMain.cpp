@@ -16,6 +16,7 @@
 #include "crystalbound/MeshData.hpp"
 #include "crystalbound/ObjLoader.hpp"
 #include "GeometryTests.hpp"
+#include "CaveSceneTests.hpp"
 #include "GenerationTests.hpp"
 
 namespace {
@@ -362,6 +363,9 @@ int main(const int argument_count, char* arguments[])
     const std::vector<TestCase> geometry_tests{
         crystalbound::test::geometry_test_cases()};
     tests.insert(tests.end(), geometry_tests.begin(), geometry_tests.end());
+    const std::vector<TestCase> cave_scene_tests{
+        crystalbound::test::cave_scene_test_cases()};
+    tests.insert(tests.end(), cave_scene_tests.begin(), cave_scene_tests.end());
 
     std::size_t failures{};
     for (const TestCase& test : tests) {

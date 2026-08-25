@@ -1,6 +1,8 @@
 #pragma once
 
+#include <filesystem>
 #include <memory>
+#include <optional>
 
 #include "npr/Camera.hpp"
 
@@ -10,7 +12,7 @@ namespace npr {
 
 class Application {
 public:
-    Application();
+    explicit Application(std::optional<std::filesystem::path> model_path = std::nullopt);
     ~Application();
 
     Application(const Application&) = delete;
@@ -50,6 +52,7 @@ private:
     int framebuffer_width_{};
     int framebuffer_height_{};
     Camera camera_{};
+    std::optional<std::filesystem::path> model_path_{};
     std::unique_ptr<RenderResources> render_resources_{};
 };
 

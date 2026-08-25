@@ -68,9 +68,39 @@ target_include_directories(tinyobjloader
         third_party/tinyobjloader
 )
 
+add_library(tinyobjloader_impl STATIC
+    src/TinyObjLoader.cpp
+)
+target_compile_features(tinyobjloader_impl PRIVATE cxx_std_17)
+target_link_libraries(tinyobjloader_impl
+    PRIVATE
+        tinyobjloader::tinyobjloader
+)
+
+add_library(npr_core STATIC
+    src/Camera.cpp
+    src/MeshData.cpp
+    src/ObjLoader.cpp
+)
+target_compile_features(npr_core PUBLIC cxx_std_17)
+set_target_properties(npr_core PROPERTIES
+    CXX_EXTENSIONS OFF
+)
+target_include_directories(npr_core
+    PUBLIC
+        include
+)
+target_link_libraries(npr_core
+    PUBLIC
+        glm::glm
+    PRIVATE
+        tinyobjloader::tinyobjloader
+        tinyobjloader_impl
+)
+
 add_executable(npr_renderer
     src/Application.cpp
-    src/Camera.cpp
+    src/GpuMesh.cpp
     src/ResourcePaths.cpp
     src/ShaderProgram.cpp
     src/main.cpp
@@ -99,25 +129,29 @@ target_link_libraries(npr_renderer
         glfw
         glm::glm
         imgui
-        tinyobjloader
+        npr_core
 )
 
-if(MSVC)
-    target_compile_options(npr_renderer PRIVATE
-        /W4
-        /permissive-
-        /Zc:__cplusplus
-    )
-else()
-    target_compile_options(npr_renderer PRIVATE
-        -Wall
-        -Wextra
-        -Wpedantic
-    )
-endif()
+function(npr_enable_first_party_warnings target_name)
+    if(MSVC)
+        target_compile_options(${target_name} PRIVATE
+            /W4
+            /permissive-
+            /Zc:__cplusplus
+        )
+    else()
+        target_compile_options(${target_name} PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+        )
+    endif()
+endfunction()
+
+npr_enable_first_party_warnings(npr_core)
+npr_enable_first_party_warnings(npr_renderer)
 
 if(NPR_BUILD_TESTS)
-    enable_testing()
     message(STATUS "NPR_BUILD_TESTS is enabled; tests begin in Blueprint Step 4.")
 endif()
 

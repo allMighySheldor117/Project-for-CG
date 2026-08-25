@@ -1,16 +1,21 @@
 #include "npr/Application.hpp"
 
 #include <algorithm>
-#include <array>
+#include <filesystem>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include <glad/gl.h>
 
 #include <GLFW/glfw3.h>
 #include <glm/mat4x4.hpp>
 
+#include "npr/GpuMesh.hpp"
+#include "npr/ObjLoader.hpp"
 #include "npr/ResourcePaths.hpp"
 #include "npr/ShaderProgram.hpp"
 
@@ -23,88 +28,6 @@ constexpr double maximum_frame_delta{0.1};
 constexpr float background_red{0.08F};
 constexpr float background_green{0.09F};
 constexpr float background_blue{0.12F};
-
-class SmokeGeometry {
-public:
-    SmokeGeometry()
-    {
-        constexpr std::array<float, 18> vertices{
-            -0.8F, -0.6F, 0.0F, 0.95F, 0.30F, 0.25F,
-             0.8F, -0.6F, 0.0F, 0.25F, 0.75F, 0.95F,
-             0.0F,  0.8F, 0.0F, 0.95F, 0.80F, 0.25F,
-        };
-
-        glGenVertexArrays(1, &vertex_array_);
-        glGenBuffers(1, &vertex_buffer_);
-        if (vertex_array_ == 0 || vertex_buffer_ == 0) {
-            release();
-            throw std::runtime_error("OpenGL could not allocate smoke-test geometry.");
-        }
-
-        glBindVertexArray(vertex_array_);
-        glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer_);
-        glBufferData(
-            GL_ARRAY_BUFFER,
-            static_cast<GLsizeiptr>(vertices.size() * sizeof(float)),
-            vertices.data(),
-            GL_STATIC_DRAW);
-
-        constexpr int values_per_vertex{6};
-        constexpr int color_offset{3};
-        glVertexAttribPointer(
-            0,
-            3,
-            GL_FLOAT,
-            GL_FALSE,
-            values_per_vertex * static_cast<int>(sizeof(float)),
-            nullptr);
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(
-            1,
-            3,
-            GL_FLOAT,
-            GL_FALSE,
-            values_per_vertex * static_cast<int>(sizeof(float)),
-            reinterpret_cast<const void*>(color_offset * sizeof(float)));
-        glEnableVertexAttribArray(1);
-
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
-        glBindVertexArray(0);
-    }
-
-    ~SmokeGeometry()
-    {
-        release();
-    }
-
-    SmokeGeometry(const SmokeGeometry&) = delete;
-    SmokeGeometry& operator=(const SmokeGeometry&) = delete;
-    SmokeGeometry(SmokeGeometry&&) = delete;
-    SmokeGeometry& operator=(SmokeGeometry&&) = delete;
-
-    void draw() const
-    {
-        glBindVertexArray(vertex_array_);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
-        glBindVertexArray(0);
-    }
-
-private:
-    void release() noexcept
-    {
-        if (vertex_buffer_ != 0) {
-            glDeleteBuffers(1, &vertex_buffer_);
-            vertex_buffer_ = 0;
-        }
-        if (vertex_array_ != 0) {
-            glDeleteVertexArrays(1, &vertex_array_);
-            vertex_array_ = 0;
-        }
-    }
-
-    unsigned int vertex_array_{};
-    unsigned int vertex_buffer_{};
-};
 
 [[nodiscard]] const char* opengl_string(const unsigned int name)
 {
@@ -123,6 +46,7 @@ private:
     return state == GLFW_PRESS || state == GLFW_REPEAT;
 }
 
+#if !defined(NDEBUG)
 void require_no_opengl_error(const char* operation)
 {
     const unsigned int error = glGetError();
@@ -131,13 +55,64 @@ void require_no_opengl_error(const char* operation)
             std::string{"OpenGL error after "} + operation + ": " + std::to_string(error));
     }
 }
+#endif
+
+[[nodiscard]] std::filesystem::path absolute_for_diagnostics(
+    const std::filesystem::path& path)
+{
+    std::error_code error;
+    const std::filesystem::path absolute = std::filesystem::absolute(path, error);
+    return error ? path : absolute;
+}
+
+void print_model_warnings(
+    const std::filesystem::path& path,
+    const std::vector<std::string>& warnings)
+{
+    for (const std::string& warning : warnings) {
+        std::cerr << "Model warning [" << path.u8string() << "]: " << warning << '\n';
+    }
+}
+
+[[nodiscard]] MeshData load_model(
+    const std::optional<std::filesystem::path>& requested_path,
+    const std::filesystem::path& bundled_path)
+{
+    if (requested_path.has_value()) {
+        const std::filesystem::path custom_path = absolute_for_diagnostics(*requested_path);
+        try {
+            ModelLoadResult result = load_obj(custom_path);
+            print_model_warnings(custom_path, result.warnings);
+            std::cout << "Loaded custom model: " << custom_path.u8string() << '\n';
+            return std::move(result.mesh);
+        } catch (const ModelLoadError& error) {
+            std::cerr << "Custom model failed; using bundled Suzanne.\n"
+                      << "  Path: " << custom_path.u8string() << '\n'
+                      << "  Reason: " << error.what() << '\n';
+        }
+    }
+
+    ModelLoadResult result;
+    try {
+        result = load_obj(bundled_path);
+    } catch (const ModelLoadError& error) {
+        throw ModelLoadError(
+            "Bundled model failed [" + bundled_path.u8string() + "]: " + error.what());
+    }
+    print_model_warnings(bundled_path, result.warnings);
+    std::cout << "Loaded bundled model: " << bundled_path.u8string() << '\n';
+    return std::move(result.mesh);
+}
 
 }  // namespace
 
 class Application::RenderResources {
 public:
-    explicit RenderResources(const std::filesystem::path& shader_directory)
-        : shader_program_(shader_directory / "smoke.vert", shader_directory / "smoke.frag")
+    RenderResources(const std::filesystem::path& shader_directory, const MeshData& mesh)
+        : shader_program_(
+              shader_directory / "normal_debug.vert",
+              shader_directory / "normal_debug.frag"),
+          mesh_(mesh)
     {
     }
 
@@ -146,20 +121,27 @@ public:
         const glm::mat4 model{1.0F};
         shader_program_.use();
         shader_program_.set_matrix("u_mvp", projection * view * model);
-        geometry_.draw();
+        mesh_.draw();
+#if !defined(NDEBUG)
         if (!first_frame_validated_) {
-            require_no_opengl_error("the first smoke-test draw");
+            require_no_opengl_error("the first indexed model draw");
             first_frame_validated_ = true;
         }
+#endif
     }
 
 private:
     ShaderProgram shader_program_;
-    SmokeGeometry geometry_;
+    GpuMesh mesh_;
+#if !defined(NDEBUG)
     bool first_frame_validated_{};
+#endif
 };
 
-Application::Application() = default;
+Application::Application(std::optional<std::filesystem::path> model_path)
+    : model_path_(std::move(model_path))
+{
+}
 
 Application::~Application()
 {
@@ -176,6 +158,9 @@ int Application::run()
 
 void Application::initialize()
 {
+    const std::filesystem::path resources = resource_root();
+    const MeshData model = load_model(model_path_, resources / "assets/models/suzanne.obj");
+
     initialize_window();
     initialize_opengl();
 
@@ -185,8 +170,7 @@ void Application::initialize()
     glfwSetKeyCallback(window_, key_callback);
     set_mouse_captured(true);
 
-    const std::filesystem::path shaders = resource_root() / "shaders";
-    render_resources_ = std::make_unique<RenderResources>(shaders);
+    render_resources_ = std::make_unique<RenderResources>(resources / "shaders", model);
 }
 
 void Application::initialize_window()
@@ -207,7 +191,7 @@ void Application::initialize_window()
     window_ = glfwCreateWindow(
         initial_window_width,
         initial_window_height,
-        "Real-Time NPR Renderer - Runtime Smoke Test",
+        "Real-Time NPR Renderer - Model Pipeline",
         nullptr,
         nullptr);
     if (window_ == nullptr) {

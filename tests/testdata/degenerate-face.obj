@@ -1,0 +1,8 @@
+# The first face is collinear; the second is valid.
+o DegenerateAndValid
+v 0 0 0
+v 1 0 0
+v 2 0 0
+v 0 1 0
+f 1 2 3
+f 1 2 4

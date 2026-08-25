@@ -59,3 +59,12 @@ license text is retained beside its imported source.
 
 The complete imported-file list and SHA-256 values are stored in
 `third_party/manifest.lock`.
+
+## Suzanne model
+
+- Upstream commit: `81e8b567643b5166e6ff40024e4ff71ad4b18676`
+- Source: https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/Suzanne
+- Copyright owner in upstream metadata: © 2017 UX3D
+- Artist in upstream metadata: Norbert Nopper
+- License: CC0 1.0 Universal
+- Local provenance and conversion record: `assets/models/LICENSE.md`

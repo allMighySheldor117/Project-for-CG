@@ -79,6 +79,10 @@ target_link_libraries(tinyobjloader_impl
 
 add_library(crystalbound_core STATIC
     src/Camera.cpp
+    src/CaveGeneration.cpp
+    src/CaveSceneFingerprint.cpp
+    src/CaveSceneGeneration.cpp
+    src/CaveSceneValidation.cpp
     src/CommandLine.cpp
     src/DeterministicRandom.cpp
     src/Generation.cpp
@@ -166,6 +170,7 @@ if(CRYSTALBOUND_BUILD_TESTS)
     enable_testing()
 
     add_executable(crystalbound_tests
+        tests/unit/CaveSceneTests.cpp
         tests/unit/GeometryTests.cpp
         tests/unit/GenerationTests.cpp
         tests/unit/TestMain.cpp

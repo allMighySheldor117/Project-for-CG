@@ -5,12 +5,13 @@
 #include <vector>
 
 #include "crystalbound/Application.hpp"
+#include "crystalbound/CaveScene.hpp"
 #include "crystalbound/CommandLine.hpp"
 #include "crystalbound/Generation.hpp"
 
 namespace {
 
-int run_application(crystalbound::GenerationResult generation)
+int run_application(crystalbound::CaveGenerationResult generation)
 {
     try {
         crystalbound::Application application{std::move(generation)};
@@ -24,25 +25,40 @@ int run_application(crystalbound::GenerationResult generation)
 void print_usage()
 {
     std::cout
-        << "Crystalbound deterministic-topology foundation\n"
+        << "Crystalbound generated-cave development build\n"
         << "Usage: crystalbound [--seed <uint64>]\n\n"
-        << "The current renderer still displays bundled Suzanne while generating and\n"
-        << "validating an abstract cave topology for later construction steps.\n"
+        << "The current build generates and displays a deterministic low-poly cave\n"
+        << "with curved tunnels, elevation, and a wooden bridge.\n"
         << "Options:\n"
         << "  --seed <uint64>  Use a strict unsigned decimal requested seed.\n"
         << "  -h, --help       Show this help text without opening a window.\n";
 }
 
-void print_generation_diagnostic(const crystalbound::GenerationResult& result)
+void print_generation_diagnostic(const crystalbound::CaveGenerationResult& result)
 {
+    const crystalbound::GenerationResult& topology{result.generation};
     std::cout << "Topology generation\n"
-              << "  Requested seed: " << result.requested_seed.value << '\n'
-              << "  Attempt seed: " << result.attempt_seed.value << '\n'
-              << "  Effective seed: " << result.effective_seed.value << '\n'
-              << "  Generator version: " << result.generator_version.value << '\n'
+              << "  Requested seed: " << topology.requested_seed.value << '\n'
+              << "  Attempt seed: " << topology.attempt_seed.value << '\n'
+              << "  Effective seed: " << topology.effective_seed.value << '\n'
+              << "  Generator version: " << topology.generator_version.value << '\n'
               << "  Fingerprint: "
-              << crystalbound::format_fingerprint(result.fingerprint) << '\n'
-              << "  Fallback: " << (result.used_fallback ? "yes" : "no") << '\n';
+              << crystalbound::format_fingerprint(topology.fingerprint) << '\n'
+              << "  Scene fingerprint: "
+              << crystalbound::format_fingerprint(result.scene.fingerprint) << '\n'
+              << "  Fallback: " << (topology.used_fallback ? "yes" : "no") << '\n'
+              << "  Attempts:\n";
+    for (const crystalbound::GenerationDiagnostic& diagnostic : topology.diagnostics) {
+        std::string_view outcome{"rejected"};
+        if (diagnostic.outcome == crystalbound::AttemptOutcome::accepted) {
+            outcome = "accepted";
+        } else if (diagnostic.outcome == crystalbound::AttemptOutcome::fallback_accepted) {
+            outcome = "fallback accepted";
+        }
+        std::cout << "    [" << diagnostic.attempt_index << "] seed "
+                  << diagnostic.attempt_seed.value << ": " << outcome << " - "
+                  << diagnostic.message << '\n';
+    }
 }
 
 }  // namespace
@@ -65,8 +81,8 @@ int main(const int argument_count, char* arguments[])
         }
         const crystalbound::Seed requested_seed{crystalbound::resolve_requested_seed(
             options, crystalbound::os_entropy_seed)};
-        crystalbound::GenerationResult generation{
-            crystalbound::generate_topology(requested_seed)};
+        crystalbound::CaveGenerationResult generation{
+            crystalbound::generate_cave(requested_seed)};
         print_generation_diagnostic(generation);
         return run_application(std::move(generation));
     } catch (const crystalbound::CommandLineError& error) {
@@ -74,7 +90,7 @@ int main(const int argument_count, char* arguments[])
                   << "\nUse --help for current usage.\n";
         return 2;
     } catch (const crystalbound::GenerationError& error) {
-        std::cerr << "Topology generation failed: " << error.what() << '\n';
+        std::cerr << "Cave generation failed: " << error.what() << '\n';
         return 1;
     } catch (const std::exception& error) {
         std::cerr << "Fatal startup error: " << error.what() << '\n';

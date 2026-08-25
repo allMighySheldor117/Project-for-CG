@@ -1,8 +1,10 @@
 #include "crystalbound/Application.hpp"
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -12,9 +14,9 @@
 
 #include <GLFW/glfw3.h>
 #include <glm/mat4x4.hpp>
+#include <glm/vec3.hpp>
 
 #include "crystalbound/GpuMesh.hpp"
-#include "crystalbound/ObjLoader.hpp"
 #include "crystalbound/ResourcePaths.hpp"
 #include "crystalbound/ShaderProgram.hpp"
 
@@ -56,40 +58,21 @@ void require_no_opengl_error(const char* operation)
 }
 #endif
 
-void print_model_warnings(
-    const std::filesystem::path& path,
-    const std::vector<std::string>& warnings)
-{
-    for (const std::string& warning : warnings) {
-        std::cerr << "Model warning [" << path.u8string() << "]: " << warning << '\n';
-    }
-}
-
-[[nodiscard]] MeshData load_model(
-    const std::filesystem::path& bundled_path)
-{
-    ModelLoadResult result;
-    try {
-        result = load_obj(bundled_path);
-    } catch (const ModelLoadError& error) {
-        throw ModelLoadError(
-            "Bundled model failed [" + bundled_path.u8string() + "]: " + error.what());
-    }
-    print_model_warnings(bundled_path, result.warnings);
-    std::cout << "Loaded bundled model: " << bundled_path.u8string() << '\n';
-    return std::move(result.mesh);
-}
-
 }  // namespace
 
 class Application::RenderResources {
 public:
-    RenderResources(const std::filesystem::path& shader_directory, const MeshData& mesh)
+    RenderResources(
+        const std::filesystem::path& shader_directory,
+        const CaveSceneData& scene)
         : shader_program_(
               shader_directory / "normal_debug.vert",
-              shader_directory / "normal_debug.frag"),
-          mesh_(mesh)
+              shader_directory / "normal_debug.frag")
     {
+        pieces_.reserve(scene.mesh_pieces.size());
+        for (const SceneMeshPiece& piece : scene.mesh_pieces) {
+            pieces_.push_back({piece.albedo, std::make_unique<GpuMesh>(piece.mesh)});
+        }
     }
 
     void render(const glm::mat4& view, const glm::mat4& projection)
@@ -97,24 +80,34 @@ public:
         const glm::mat4 model{1.0F};
         shader_program_.use();
         shader_program_.set_matrix("u_mvp", projection * view * model);
-        mesh_.draw();
+        for (const RenderPiece& piece : pieces_) {
+            shader_program_.set_vector(
+                "u_albedo",
+                {piece.albedo[0], piece.albedo[1], piece.albedo[2]});
+            piece.mesh->draw();
+        }
 #if !defined(NDEBUG)
         if (!first_frame_validated_) {
-            require_no_opengl_error("the first indexed model draw");
+            require_no_opengl_error("the first generated cave draw");
             first_frame_validated_ = true;
         }
 #endif
     }
 
 private:
+    struct RenderPiece {
+        std::array<float, 3> albedo{};
+        std::unique_ptr<GpuMesh> mesh{};
+    };
+
     ShaderProgram shader_program_;
-    GpuMesh mesh_;
+    std::vector<RenderPiece> pieces_{};
 #if !defined(NDEBUG)
     bool first_frame_validated_{};
 #endif
 };
 
-Application::Application(GenerationResult generation)
+Application::Application(CaveGenerationResult generation)
     : generation_(std::move(generation))
 {
 }
@@ -135,7 +128,13 @@ int Application::run()
 void Application::initialize()
 {
     const std::filesystem::path resources = resource_root();
-    const MeshData model = load_model(resources / "assets/models/suzanne.obj");
+    const GeometryVector3& position{generation_.scene.start_camera_position_metres};
+    const GeometryVector3& forward{generation_.scene.start_camera_forward};
+    camera_.set_pose(
+        {static_cast<float>(position.x), static_cast<float>(position.y),
+         static_cast<float>(position.z)},
+        {static_cast<float>(forward.x), static_cast<float>(forward.y),
+         static_cast<float>(forward.z)});
 
     initialize_window();
     initialize_opengl();
@@ -146,7 +145,14 @@ void Application::initialize()
     glfwSetKeyCallback(window_, key_callback);
     set_mouse_captured(true);
 
-    render_resources_ = std::make_unique<RenderResources>(resources / "shaders", model);
+    render_resources_ = std::make_unique<RenderResources>(
+        resources / "shaders", generation_.scene);
+    std::cout << "Generated cave scene\n"
+              << "  Mesh pieces: " << generation_.scene.mesh_pieces.size() << '\n'
+              << "  Static vertices: " << generation_.scene.static_vertex_count << '\n'
+              << "  Colliders: " << generation_.scene.colliders.size() << '\n'
+              << "  Scene fingerprint: "
+              << format_fingerprint(generation_.scene.fingerprint) << '\n';
 }
 
 void Application::initialize_window()
@@ -167,7 +173,7 @@ void Application::initialize_window()
     window_ = glfwCreateWindow(
         initial_window_width,
         initial_window_height,
-        "Crystalbound - Spline and Mesh Contract Development",
+        "Crystalbound - Generated Cave Scene",
         nullptr,
         nullptr);
     if (window_ == nullptr) {

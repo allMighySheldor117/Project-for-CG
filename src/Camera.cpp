@@ -61,6 +61,24 @@ void Camera::rotate(const float horizontal_delta, const float vertical_delta)
     update_basis();
 }
 
+void Camera::set_pose(const glm::vec3& position, const glm::vec3& forward)
+{
+    if (!std::isfinite(position.x) || !std::isfinite(position.y)
+        || !std::isfinite(position.z) || !std::isfinite(forward.x)
+        || !std::isfinite(forward.y) || !std::isfinite(forward.z)) {
+        throw std::invalid_argument("Camera pose must be finite.");
+    }
+    const float forward_length{glm::length(forward)};
+    if (!std::isfinite(forward_length) || forward_length <= 0.0F) {
+        throw std::invalid_argument("Camera forward direction must be nonzero.");
+    }
+    position_ = position;
+    const glm::vec3 direction{forward / forward_length};
+    yaw_degrees_ = glm::degrees(std::atan2(direction.z, direction.x));
+    pitch_degrees_ = glm::degrees(std::asin(std::clamp(direction.y, -1.0F, 1.0F)));
+    update_basis();
+}
+
 glm::mat4 Camera::view_matrix() const
 {
     return glm::lookAt(position_, position_ + front_, up_);

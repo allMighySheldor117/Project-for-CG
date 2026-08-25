@@ -3,7 +3,7 @@
 #include <memory>
 
 #include "crystalbound/Camera.hpp"
-#include "crystalbound/Generation.hpp"
+#include "crystalbound/CaveScene.hpp"
 
 struct GLFWwindow;
 
@@ -11,7 +11,7 @@ namespace crystalbound {
 
 class Application {
 public:
-    explicit Application(GenerationResult generation);
+    explicit Application(CaveGenerationResult generation);
     ~Application();
 
     Application(const Application&) = delete;
@@ -51,7 +51,7 @@ private:
     int framebuffer_width_{};
     int framebuffer_height_{};
     Camera camera_{};
-    GenerationResult generation_{};
+    CaveGenerationResult generation_{};
     std::unique_ptr<RenderResources> render_resources_{};
 };
 

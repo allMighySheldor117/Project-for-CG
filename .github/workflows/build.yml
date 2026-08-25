@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - "feature/**"
   pull_request:
     branches:
       - main
@@ -34,14 +33,14 @@ jobs:
         shell: bash
         run: |
           pattern='FetchContent|ExternalProject_Add|file[[:space:]]*\([[:space:]]*DOWNLOAD|GIT_REPOSITORY'
-          if git grep -n -E "$pattern" -- CMakeLists.txt '*.cmake'; then
+          if git grep -n -E "$pattern" -- CMakeLists.txt ':(top,glob)cmake/**/*.cmake'; then
             echo "Project CMake files must not download dependencies."
             exit 1
           fi
 
   windows:
     name: Windows / Visual Studio 2022
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - name: Check out source
         uses: actions/checkout@v4

@@ -69,16 +69,30 @@ target_include_directories(tinyobjloader
 )
 
 add_executable(npr_renderer
+    src/Application.cpp
+    src/Camera.cpp
+    src/ResourcePaths.cpp
+    src/ShaderProgram.cpp
     src/main.cpp
 )
 target_compile_features(npr_renderer PRIVATE cxx_std_17)
 set_target_properties(npr_renderer PROPERTIES
     CXX_EXTENSIONS OFF
 )
+target_include_directories(npr_renderer
+    PRIVATE
+        include
+)
 target_compile_definitions(npr_renderer
     PRIVATE
         GLFW_INCLUDE_NONE
 )
+if(WIN32)
+    target_compile_definitions(npr_renderer PRIVATE
+        NOMINMAX
+        WIN32_LEAN_AND_MEAN
+    )
+endif()
 target_link_libraries(npr_renderer
     PRIVATE
         glad

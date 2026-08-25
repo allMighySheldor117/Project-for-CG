@@ -1,13 +1,13 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(
-    npr_renderer
+    crystalbound
     VERSION 0.1.0
-    DESCRIPTION "Real-time non-photorealistic renderer"
+    DESCRIPTION "First-person procedural cave exploration game"
     LANGUAGES C CXX
 )
 
-option(NPR_BUILD_TESTS "Build NPR renderer tests" OFF)
+option(CRYSTALBOUND_BUILD_TESTS "Build Crystalbound tests" OFF)
 
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -77,20 +77,20 @@ target_link_libraries(tinyobjloader_impl
         tinyobjloader::tinyobjloader
 )
 
-add_library(npr_core STATIC
+add_library(crystalbound_core STATIC
     src/Camera.cpp
     src/MeshData.cpp
     src/ObjLoader.cpp
 )
-target_compile_features(npr_core PUBLIC cxx_std_17)
-set_target_properties(npr_core PROPERTIES
+target_compile_features(crystalbound_core PUBLIC cxx_std_17)
+set_target_properties(crystalbound_core PROPERTIES
     CXX_EXTENSIONS OFF
 )
-target_include_directories(npr_core
+target_include_directories(crystalbound_core
     PUBLIC
         include
 )
-target_link_libraries(npr_core
+target_link_libraries(crystalbound_core
     PUBLIC
         glm::glm
     PRIVATE
@@ -98,41 +98,41 @@ target_link_libraries(npr_core
         tinyobjloader_impl
 )
 
-add_executable(npr_renderer
+add_executable(crystalbound
     src/Application.cpp
     src/GpuMesh.cpp
     src/ResourcePaths.cpp
     src/ShaderProgram.cpp
     src/main.cpp
 )
-target_compile_features(npr_renderer PRIVATE cxx_std_17)
-set_target_properties(npr_renderer PROPERTIES
+target_compile_features(crystalbound PRIVATE cxx_std_17)
+set_target_properties(crystalbound PROPERTIES
     CXX_EXTENSIONS OFF
 )
-target_include_directories(npr_renderer
+target_include_directories(crystalbound
     PRIVATE
         include
 )
-target_compile_definitions(npr_renderer
+target_compile_definitions(crystalbound
     PRIVATE
         GLFW_INCLUDE_NONE
 )
 if(WIN32)
-    target_compile_definitions(npr_renderer PRIVATE
+    target_compile_definitions(crystalbound PRIVATE
         NOMINMAX
         WIN32_LEAN_AND_MEAN
     )
 endif()
-target_link_libraries(npr_renderer
+target_link_libraries(crystalbound
     PRIVATE
         glad
         glfw
         glm::glm
         imgui
-        npr_core
+        crystalbound_core
 )
 
-function(npr_enable_first_party_warnings target_name)
+function(crystalbound_enable_first_party_warnings target_name)
     if(MSVC)
         target_compile_options(${target_name} PRIVATE
             /W4
@@ -148,29 +148,58 @@ function(npr_enable_first_party_warnings target_name)
     endif()
 endfunction()
 
-npr_enable_first_party_warnings(npr_core)
-npr_enable_first_party_warnings(npr_renderer)
+crystalbound_enable_first_party_warnings(crystalbound_core)
+crystalbound_enable_first_party_warnings(crystalbound)
 
-if(NPR_BUILD_TESTS)
-    message(STATUS "NPR_BUILD_TESTS is enabled; tests begin in Blueprint Step 4.")
+if(CRYSTALBOUND_BUILD_TESTS)
+    enable_testing()
+
+    add_executable(crystalbound_tests
+        tests/unit/TestMain.cpp
+    )
+    target_compile_features(crystalbound_tests PRIVATE cxx_std_17)
+    set_target_properties(crystalbound_tests PROPERTIES
+        CXX_EXTENSIONS OFF
+    )
+    target_link_libraries(crystalbound_tests
+        PRIVATE
+            crystalbound_core
+    )
+    crystalbound_enable_first_party_warnings(crystalbound_tests)
+
+    add_custom_command(
+        TARGET crystalbound_tests
+        POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata"
+        COMMENT "Copying Crystalbound test fixtures"
+        VERBATIM
+    )
+
+    add_test(
+        NAME crystalbound_core_tests
+        COMMAND crystalbound_tests
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata"
+    )
 endif()
 
 foreach(resource_directory IN ITEMS assets shaders)
     add_custom_command(
-        TARGET npr_renderer
+        TARGET crystalbound
         POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory
-                "$<TARGET_FILE_DIR:npr_renderer>/resources/${resource_directory}"
+                "$<TARGET_FILE_DIR:crystalbound>/resources/${resource_directory}"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${CMAKE_CURRENT_SOURCE_DIR}/${resource_directory}"
-                "$<TARGET_FILE_DIR:npr_renderer>/resources/${resource_directory}"
+                "$<TARGET_FILE_DIR:crystalbound>/resources/${resource_directory}"
         COMMENT "Copying ${resource_directory} resources"
         VERBATIM
     )
 endforeach()
 
 install(
-    TARGETS npr_renderer
+    TARGETS crystalbound
     RUNTIME DESTINATION .
 )
 install(

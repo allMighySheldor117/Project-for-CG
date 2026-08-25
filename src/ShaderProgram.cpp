@@ -1,4 +1,4 @@
-#include "npr/ShaderProgram.hpp"
+#include "crystalbound/ShaderProgram.hpp"
 
 #include <algorithm>
 #include <fstream>
@@ -11,7 +11,7 @@
 #include <glad/gl.h>
 #include <glm/gtc/type_ptr.hpp>
 
-namespace npr {
+namespace crystalbound {
 namespace {
 
 class ShaderHandle {
@@ -235,4 +235,4 @@ int ShaderProgram::uniform_location(const std::string_view name) const
     return location;
 }
 
-}  // namespace npr
+}  // namespace crystalbound

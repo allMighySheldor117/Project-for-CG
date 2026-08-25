@@ -5,9 +5,9 @@
 #include <string>
 #include <vector>
 
-#include "npr/MeshData.hpp"
+#include "crystalbound/MeshData.hpp"
 
-namespace npr {
+namespace crystalbound {
 
 class ModelLoadError : public std::runtime_error {
 public:
@@ -21,4 +21,4 @@ struct ModelLoadResult {
 
 [[nodiscard]] ModelLoadResult load_obj(const std::filesystem::path& path);
 
-}  // namespace npr
+}  // namespace crystalbound

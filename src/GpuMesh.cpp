@@ -1,4 +1,4 @@
-#include "npr/GpuMesh.hpp"
+#include "crystalbound/GpuMesh.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -9,7 +9,7 @@
 
 #include <glad/gl.h>
 
-namespace npr {
+namespace crystalbound {
 namespace {
 
 static_assert(std::is_standard_layout_v<Vertex>);
@@ -125,4 +125,4 @@ void GpuMesh::release() noexcept
     index_count_ = 0;
 }
 
-}  // namespace npr
+}  // namespace crystalbound

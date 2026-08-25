@@ -1,12 +1,14 @@
-# Real-Time Non-Photorealistic Renderer
+# Crystalbound
 
-An interactive C++17/OpenGL 3.3 Core project for comparing Phong illumination,
-cel shading, and cel shading with silhouette outlines.
+Crystalbound is a developing first-person C++17/OpenGL 3.3 cave-exploration
+game. The finished game will generate a cave in which the player finds five
+elemental crystals and activates an ancient exit arch.
 
-The repository is currently at Blueprint Step 3. It loads a real OBJ mesh,
-normalizes it into a predictable viewing volume, uploads indexed geometry to
-OpenGL, and visualizes mesh normals while retaining the reusable first-person
-camera. The bundled default is the Suzanne model.
+The repository is currently at construction Step 4A. The reusable graphics
+foundation opens an OpenGL window, provides a first-person development camera,
+loads and validates OBJ meshes, and visualizes normals. The bundled Suzanne
+model remains a temporary development smoke scene while cave generation is
+built in later steps.
 
 ## Current controls
 
@@ -27,8 +29,14 @@ Close the application with the window close button. Releasing the mouse with
 Run with no arguments to use bundled Suzanne, or pass one optional OBJ path:
 
 ~~~powershell
-.\build\step-03\Debug\npr_renderer.exe C:\models\example.obj
+.\build\step-04a\Debug\crystalbound.exe C:\models\example.obj
 ~~~
+
+Show the currently implemented command-line interface without opening a window:
+
+```powershell
+.\build\step-04a\Debug\crystalbound.exe --help
+```
 
 If a custom path cannot be opened or validated, the application reports the
 path and reason, then falls back to bundled Suzanne. A missing or invalid
@@ -65,21 +73,22 @@ the corresponding system development packages to already be installed.
 ## Configure, build, and install on Windows
 
 ```powershell
-cmake -S . -B build/step-03 -G "Visual Studio 17 2022" -A x64 -DNPR_BUILD_TESTS=OFF
-cmake --build build/step-03 --config Debug
-cmake --install build/step-03 --config Debug --prefix build/install-03
+cmake -S . -B build/step-04a -G "Visual Studio 17 2022" -A x64 -DCRYSTALBOUND_BUILD_TESTS=ON
+cmake --build build/step-04a --config Debug --target crystalbound crystalbound_tests
+ctest --test-dir build/step-04a -C Debug --output-on-failure
+cmake --install build/step-04a --config Debug --prefix build/install-04a
 ```
 
 Run the build-tree executable:
 
 ```powershell
-.\build\step-03\Debug\npr_renderer.exe
+.\build\step-04a\Debug\crystalbound.exe
 ```
 
 Run the installed executable:
 
 ```powershell
-.\build\install-03\npr_renderer.exe
+.\build\install-04a\crystalbound.exe
 ```
 
 Both executables resolve `resources/assets` and `resources/shaders` relative to
@@ -93,7 +102,7 @@ working directory at runtime.
 - `Application` owns initialization, input routing, the frame loop, and ordered
   shutdown.
 - `Camera` provides delta-time movement, mouse look, and clamped pitch.
-- `npr_core` owns the CPU-only camera, mesh representation, OBJ parsing,
+- `crystalbound_core` owns the CPU-only camera, mesh representation, OBJ parsing,
   validation, normal generation, and normalization logic.
 - `GpuMesh` owns one VAO, VBO, and element buffer for indexed drawing.
   Each interleaved vertex is 24 bytes: position starts at byte 0, normal starts
@@ -119,9 +128,15 @@ sample at a pinned commit. Its source hashes, output hash, author metadata,
 license links, and exact conversion policy are recorded in
 [assets/models/LICENSE.md](assets/models/LICENSE.md).
 
+## Automated checks
+
+`crystalbound_tests` exercises the CPU mesh and OBJ-loading policies without
+creating a window or OpenGL context. GitHub Actions builds and runs these tests
+on Windows and Linux. GPU rendering remains a manual check because CI runners
+do not provide a representative interactive graphics environment.
+
 ## Current limitations
 
-This step intentionally does not include Phong lighting, cel shading,
-silhouette outlines, ImGui behavior, or automated tests. The OBJ fixtures under
-[tests/testdata](tests/testdata) document the cases introduced now and become
-executable tests in Blueprint Step 4.
+This is still the technical foundation, not the complete game. It does not yet
+include seeded cave generation, grounded collision, cave lighting, procedural
+materials, elemental crystals, the exit arch, or the final game UI.

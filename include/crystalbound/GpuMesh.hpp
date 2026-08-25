@@ -2,9 +2,9 @@
 
 #include <cstddef>
 
-#include "npr/MeshData.hpp"
+#include "crystalbound/MeshData.hpp"
 
-namespace npr {
+namespace crystalbound {
 
 class GpuMesh {
 public:
@@ -27,4 +27,4 @@ private:
     int index_count_{};
 };
 
-}  // namespace npr
+}  // namespace crystalbound

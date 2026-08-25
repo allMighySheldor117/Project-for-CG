@@ -7,7 +7,7 @@
 #include <glm/mat4x4.hpp>
 #include <glm/vec3.hpp>
 
-namespace npr {
+namespace crystalbound {
 
 class ShaderProgram {
 public:
@@ -34,4 +34,4 @@ private:
     unsigned int program_id_{};
 };
 
-}  // namespace npr
+}  // namespace crystalbound

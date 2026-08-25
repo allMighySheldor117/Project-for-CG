@@ -1,4 +1,4 @@
-#include "npr/ResourcePaths.hpp"
+#include "crystalbound/ResourcePaths.hpp"
 
 #include <stdexcept>
 #include <string>
@@ -13,7 +13,7 @@
 #error "Executable-relative resources are implemented only for Windows and Linux."
 #endif
 
-namespace npr {
+namespace crystalbound {
 
 std::filesystem::path executable_path()
 {
@@ -53,4 +53,4 @@ std::filesystem::path resource_root()
     return path;
 }
 
-}  // namespace npr
+}  // namespace crystalbound

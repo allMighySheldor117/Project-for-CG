@@ -17,6 +17,7 @@
 #include "crystalbound/ObjLoader.hpp"
 #include "GeometryTests.hpp"
 #include "CaveSceneTests.hpp"
+#include "ElementalVisualsTests.hpp"
 #include "GenerationTests.hpp"
 #include "PlayerControllerTests.hpp"
 #include "ReachabilityTests.hpp"
@@ -379,6 +380,10 @@ int main(const int argument_count, char* arguments[])
     const std::vector<TestCase> rendering_tests{
         crystalbound::test::rendering_test_cases()};
     tests.insert(tests.end(), rendering_tests.begin(), rendering_tests.end());
+    const std::vector<TestCase> elemental_visuals_tests{
+        crystalbound::test::elemental_visuals_test_cases()};
+    tests.insert(
+        tests.end(), elemental_visuals_tests.begin(), elemental_visuals_tests.end());
 
     std::size_t failures{};
     for (const TestCase& test : tests) {

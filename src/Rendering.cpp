@@ -329,6 +329,9 @@ MaterialParameters material_parameters(const MaterialKind material)
     case MaterialKind::rock:
         return {{0.035F, 0.040F, 0.050F}, {0.88F, 0.92F, 1.0F},
             {0.14F, 0.16F, 0.20F}, {0.0F, 0.0F, 0.0F}, 22.0F, 0.32F, 4.0F};
+    case MaterialKind::untextured:
+        return {{0.030F, 0.030F, 0.035F}, {1.0F, 1.0F, 1.0F},
+            {0.35F, 0.35F, 0.40F}, {0.0F, 0.0F, 0.0F}, 42.0F, 1.0F, 1.0F};
     }
     throw std::invalid_argument("Material kind is not supported.");
 }
@@ -481,7 +484,9 @@ void validate_render_pass_state(const RenderPassState& state)
     const bool valid_cull{state.cull_mode == CullMode::none
         || state.cull_mode == CullMode::back};
     const bool valid_blend{state.blend_mode == BlendMode::disabled
-        || state.blend_mode == BlendMode::straight_alpha};
+        || state.blend_mode == BlendMode::straight_alpha
+        || state.blend_mode == BlendMode::premultiplied_alpha
+        || state.blend_mode == BlendMode::additive};
     if (!valid_cull || !valid_blend) {
         throw std::invalid_argument("Render pass contains an unsupported state value.");
     }

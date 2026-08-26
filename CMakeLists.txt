@@ -85,6 +85,7 @@ add_library(crystalbound_core STATIC
     src/CaveSceneValidation.cpp
     src/CommandLine.cpp
     src/DeterministicRandom.cpp
+    src/ElementalVisuals.cpp
     src/Generation.cpp
     src/GenerationTypes.cpp
     src/GeometryFingerprint.cpp
@@ -175,6 +176,7 @@ if(CRYSTALBOUND_BUILD_TESTS)
 
     add_executable(crystalbound_tests
         tests/unit/CaveSceneTests.cpp
+        tests/unit/ElementalVisualsTests.cpp
         tests/unit/GeometryTests.cpp
         tests/unit/GenerationTests.cpp
         tests/unit/PlayerControllerTests.cpp

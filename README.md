@@ -5,22 +5,23 @@ game. Each run builds a deterministic low-poly cave from a seed. The finished
 game will ask the player to explore its branching passages, collect five
 elemental crystals, and activate an ancient exit arch.
 
-The repository is currently at construction Step 7. It generates and
+The repository is currently at construction Step 8A. It generates and
 mechanically validates complete chambers, curved tunnels, junctions, and at
 least one wooden bridge before publishing the cave for exploration. The cave
-now has its shared visual foundation: Phong lighting, a warm camera lantern,
-deterministic procedural rock and wood, triplanar cave mapping, directional
-bridge grain, and distance fog. Walking, sprinting, jumping, collision response,
-bridge traversal, falling, and safe-chamber respawning remain unchanged.
+now gives each elemental chamber a distinct procedural identity, glowing
+crystal, local crystal light, and restrained animated effects on top of the
+shared Phong lighting, procedural materials, and distance fog. Walking,
+sprinting, jumping, collision response, bridge traversal, falling, and
+safe-chamber respawning remain unchanged.
 
 ## Run a generated cave
 
 Build and launch a reproducible scene:
 
 ```powershell
-cmake -S . -B build/step-07 -G "Visual Studio 17 2022" -A x64 -DCRYSTALBOUND_BUILD_TESTS=ON
-cmake --build build/step-07 --config Debug --target crystalbound crystalbound_tests
-.\build\step-07\Debug\crystalbound.exe --seed 42
+cmake -S . -B build/step-08a -G "Visual Studio 17 2022" -A x64 -DCRYSTALBOUND_BUILD_TESTS=ON
+cmake --build build/step-08a --config Debug --target crystalbound crystalbound_tests
+.\build\step-08a\Debug\crystalbound.exe --seed 42
 ```
 
 Omit `--seed` to choose a requested seed from operating-system entropy. Entropy
@@ -45,7 +46,7 @@ Scene fingerprint: 9fb15c446b74730d
 Show command-line help without opening a window:
 
 ```powershell
-.\build\step-07\Debug\crystalbound.exe --help
+.\build\step-08a\Debug\crystalbound.exe --help
 ```
 
 ## Current scene
@@ -60,6 +61,12 @@ The generated cave provides:
 - curved Catmull-Rom tunnel sweeps with stable parallel-transport frames;
 - junction geometry joining every chamber portal to its route;
 - one deterministic bridge route with a walkable wooden deck and rails;
+- one Fire, Water, Earth, Air, and Aether crystal, each with a different
+  low-poly silhouette, color, glow rhythm, pedestal, and smaller future socket
+  variant;
+- Fire lava rocks, glowing cracks, and sparks; Water pools and cool mist;
+  Earth pillars and stalagmites; Air wood spires, wind ribbons, and motes; and
+  Aether arch stones, an orbiting rock, and violet haze;
 - separate chamber-floor, chamber-boundary, tunnel, bridge-deck, bridge-rail,
   and fall-region collider records; and
 - canonical scene fingerprints derived from integer contracts rather than raw
@@ -98,7 +105,7 @@ mode.
   state, and its 10.5 m cutoff keeps nearby paths readable without illuminating
   the entire cave.
 - The point-light policy is capped at eight slots: one reserved lantern, five
-  future crystal slots, and at most two decorative lights. Candidate selection
+  active crystal slots, and at most two decorative lights. Candidate selection
   is deterministic: a relevant chamber crystal is reserved, then distance and
   stable object ID decide the remaining order.
 - Rock is generated on the CPU as a periodic 128x128 linear `R8` texture. Four
@@ -120,9 +127,12 @@ mode.
 - The default framebuffer is requested and verified as sRGB. Shader lighting is
   linear, wood is sampled from an sRGB texture, scalar rock noise remains linear,
   and `GL_FRAMEBUFFER_SRGB` performs final display encoding.
-- Opaque and UI pass contracts explicitly establish framebuffer gamma, depth
-  testing/writes, back-face culling, and blending rather than depending on
-  leftover OpenGL state.
+- Opaque, emissive, premultiplied-alpha, additive, and UI pass contracts
+  explicitly establish framebuffer gamma, depth testing/writes, back-face
+  culling, and blending rather than depending on leftover OpenGL state.
+- Transparent water and fog are sorted back-to-front with stable-ID ties;
+  sparks and motes use a separate additive pass. All effect geometry is purely
+  visual and never enters the collision or reachability contracts.
 - CPU scene construction is independent of GLFW and OpenGL, so generation and
   validation run in the test harness without a window or graphics context.
 - A CPU-only collision world is derived from the same canonical chamber and
@@ -174,25 +184,25 @@ packages are already installed.
 ## Build, test, and install
 
 ```powershell
-cmake -S . -B build/step-07 -G "Visual Studio 17 2022" -A x64 -DCRYSTALBOUND_BUILD_TESTS=ON
-cmake --build build/step-07 --config Debug --target crystalbound crystalbound_tests
-ctest --test-dir build/step-07 -C Debug --output-on-failure
-cmake --install build/step-07 --config Debug --prefix build/install-07-debug
-cmake --build build/step-07 --config Release --target crystalbound crystalbound_tests
-ctest --test-dir build/step-07 -C Release --output-on-failure
-cmake --install build/step-07 --config Release --prefix build/install-07
+cmake -S . -B build/step-08a -G "Visual Studio 17 2022" -A x64 -DCRYSTALBOUND_BUILD_TESTS=ON
+cmake --build build/step-08a --config Debug --target crystalbound crystalbound_tests
+ctest --test-dir build/step-08a -C Debug --output-on-failure
+cmake --install build/step-08a --config Debug --prefix build/install-08a-debug
+cmake --build build/step-08a --config Release --target crystalbound crystalbound_tests
+ctest --test-dir build/step-08a -C Release --output-on-failure
+cmake --install build/step-08a --config Release --prefix build/install-08a
 ```
 
 Run the dependency-free CPU harness directly to see every named case:
 
 ```powershell
-.\build\step-07\Debug\crystalbound_tests.exe .\build\step-07\Debug\testdata
+.\build\step-08a\Debug\crystalbound_tests.exe .\tests\testdata
 ```
 
 Run the installed executable from any working directory:
 
 ```powershell
-.\build\install-07\crystalbound.exe --seed 42
+.\build\install-08a\crystalbound.exe --seed 42
 ```
 
 Build-tree and installed executables resolve shaders and other runtime resources
@@ -207,13 +217,17 @@ hashes, and licenses are recorded in `third_party/manifest.lock`,
 
 ## Automated checks
 
-`crystalbound_tests` runs 120 deterministic CPU cases without a window, OpenGL
-context, network, timing sleeps, or screenshot comparison. All 95 Step 6B cases
-remain. The 25 Step 7 cases lock texture dimensions/formats/sampling, fixed-point
+`crystalbound_tests` runs 136 deterministic CPU cases without a window, OpenGL
+context, network, timing sleeps, or screenshot comparison. All 120 tests through
+Step 7 remain. The Step 7 cases lock texture dimensions/formats/sampling, fixed-point
 rounding and fade behavior, periodic noise, octave weights, anisotropy, palette
 math, byte repeatability and goldens, material assignment, triplanar weights,
 light reservations/selection/ties, finite validation, fog boundaries,
-render-pass/gamma state, and the accepted/fallback seed contracts.
+render-pass/gamma state, and the accepted/fallback seed contracts. The 16 Step
+8A cases lock elemental identities, procedural mesh validity, socket scale,
+decoration substreams, fixed-time animation, crystal lights, transparent
+ordering, budgets, render-pass policy, and isolation from structural collision
+and fingerprint contracts.
 
 Seed `42` is the normal-acceptance example. Seed `123456789` is the checked
 fallback example: its eight normal candidates are rejected by existing geometry
@@ -228,12 +242,11 @@ downloads. GPU rendering remains a manual check.
 
 ## Current limitations
 
-Step 7 provides a lit, mechanically validated cave, not the complete game loop.
-Crystal meshes and elemental chamber dressing, collection, the exit arch,
-timer, game-state UI, water or fog ribbons, particles, shadows, bloom,
-post-processing, sound, and maps remain intentionally out of scope for Step 8
-and later work.
+Step 8A provides a lit, mechanically validated cave with elemental visual
+identities, not the complete game loop. Crystal collection, socket placement,
+exit activation, timer, game-state UI, shadows, bloom, post-processing, sound,
+and maps remain intentionally out of scope for Step 8B and later work.
 
-Step 7 intentionally has no shadow mapping. A local point light can therefore
+Step 8A intentionally has no shadow mapping. A local point light can therefore
 leak through a thin wall; the lantern's bounded range and attenuation limit the
 artifact but cannot eliminate it.

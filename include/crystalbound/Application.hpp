@@ -1,9 +1,12 @@
 #pragma once
 
 #include <memory>
+#include <optional>
+#include <vector>
 
 #include "crystalbound/Camera.hpp"
 #include "crystalbound/CaveScene.hpp"
+#include "crystalbound/CrystalCollection.hpp"
 #include "crystalbound/PlayerController.hpp"
 
 struct GLFWwindow;
@@ -30,6 +33,8 @@ private:
     void initialize_opengl();
     void run_frame_loop();
     void process_movement(float delta_seconds);
+    void process_crystal_interaction();
+    void render_crystal_prompt();
     void set_mouse_captured(bool captured);
     void shutdown() noexcept;
 
@@ -55,6 +60,12 @@ private:
     CaveGenerationResult generation_{};
     std::unique_ptr<GroundedController> controller_{};
     bool backlog_warning_emitted_{};
+    bool imgui_initialized_{};
+    CrystalCollectionState crystal_collection_{};
+    RisingEdgeButton interaction_button_{};
+    std::vector<CrystalInteractionTarget> interaction_targets_{};
+    VisibilityWorld visibility_world_{};
+    std::optional<FocusedCrystal> focused_crystal_{};
     std::unique_ptr<RenderResources> render_resources_{};
 };
 

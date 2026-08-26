@@ -94,6 +94,7 @@ add_library(crystalbound_core STATIC
     src/ObjLoader.cpp
     src/PlayerController.cpp
     src/Reachability.cpp
+    src/Rendering.cpp
     src/TopologyFingerprint.cpp
     src/TopologyGeneration.cpp
     src/TopologyValidation.cpp
@@ -118,6 +119,7 @@ target_link_libraries(crystalbound_core
 add_executable(crystalbound
     src/Application.cpp
     src/GpuMesh.cpp
+    src/GpuTexture.cpp
     src/ResourcePaths.cpp
     src/ShaderProgram.cpp
     src/main.cpp
@@ -177,6 +179,7 @@ if(CRYSTALBOUND_BUILD_TESTS)
         tests/unit/GenerationTests.cpp
         tests/unit/PlayerControllerTests.cpp
         tests/unit/ReachabilityTests.cpp
+        tests/unit/RenderingTests.cpp
         tests/unit/TestMain.cpp
     )
     target_compile_features(crystalbound_tests PRIVATE cxx_std_17)

@@ -227,11 +227,16 @@ void ShaderProgram::set_matrix(const std::string_view name, const glm::mat4& val
 
 int ShaderProgram::uniform_location(const std::string_view name) const
 {
+    const auto cached{uniform_locations_.find(name)};
+    if (cached != uniform_locations_.end()) {
+        return cached->second;
+    }
     const std::string null_terminated_name{name};
     const int location = glGetUniformLocation(program_id_, null_terminated_name.c_str());
     if (location < 0) {
         throw std::runtime_error("Shader uniform is missing or inactive: " + null_terminated_name);
     }
+    uniform_locations_.emplace(null_terminated_name, location);
     return location;
 }
 

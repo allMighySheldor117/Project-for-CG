@@ -23,6 +23,7 @@ public:
 
     [[nodiscard]] glm::mat4 view_matrix() const;
     [[nodiscard]] glm::mat4 projection_matrix(float aspect_ratio) const;
+    [[nodiscard]] const glm::vec3& position() const noexcept;
     [[nodiscard]] float yaw_degrees() const noexcept;
 
 private:

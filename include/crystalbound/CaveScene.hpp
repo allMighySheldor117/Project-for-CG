@@ -9,6 +9,7 @@
 
 #include "crystalbound/Generation.hpp"
 #include "crystalbound/Geometry.hpp"
+#include "crystalbound/Rendering.hpp"
 
 namespace crystalbound {
 
@@ -60,6 +61,7 @@ struct SceneMeshPiece {
     std::uint64_t stable_object_id{};
     MeshData mesh{};
     AxisAlignedBounds bounds{};
+    MaterialKind material{MaterialKind::rock};
     std::array<float, 3> albedo{};
 };
 

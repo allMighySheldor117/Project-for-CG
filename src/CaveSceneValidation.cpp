@@ -211,6 +211,12 @@ void validate_meshes_and_budgets(
         || scene.opaque_draw_call_count > geometry_budgets.maximum_opaque_draw_calls) {
         errors.push_back("Scene opaque draw-call count violates the locked budget.");
     }
+    if (vertex_count + scene.elemental_visuals.generated_vertex_count
+            > geometry_budgets.maximum_static_vertices
+        || scene.opaque_draw_call_count + scene.elemental_visuals.opaque_draw_call_count
+            > geometry_budgets.maximum_opaque_draw_calls) {
+        errors.push_back("Combined structural and elemental geometry exceeds a locked budget.");
+    }
 }
 
 void validate_colliders(const CaveSceneData& scene, std::vector<std::string>& errors)
@@ -245,6 +251,9 @@ std::vector<std::string> validate_cave_scene(
     validate_routes(topology, scene, errors);
     validate_meshes_and_budgets(scene, errors);
     validate_colliders(scene, errors);
+    const std::vector<std::string> elemental_errors{
+        validate_elemental_scene(topology, scene.elemental_visuals)};
+    errors.insert(errors.end(), elemental_errors.begin(), elemental_errors.end());
 
     const double forward_length{std::sqrt(
         scene.start_camera_forward.x * scene.start_camera_forward.x

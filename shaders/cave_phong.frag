@@ -2,6 +2,7 @@
 
 const int maximum_point_lights = 8;
 const int rock_material = 0;
+const int untextured_material = 2;
 const float minimum_weight_sum = 0.000001;
 
 struct PointLight {
@@ -24,6 +25,7 @@ uniform vec3 u_material_ambient;
 uniform vec3 u_material_diffuse;
 uniform vec3 u_material_specular;
 uniform vec3 u_material_emission;
+uniform float u_alpha;
 uniform float u_material_shininess;
 uniform float u_texture_scale;
 uniform float u_triplanar_sharpness;
@@ -53,6 +55,9 @@ vec3 surface_color(vec3 normal)
 {
     if (u_material_kind == rock_material) {
         return u_albedo * mix(0.54, 1.16, rock_noise(normal));
+    }
+    if (u_material_kind == untextured_material) {
+        return u_albedo;
     }
     vec2 grain_coordinates = texture_coordinates * vec2(u_texture_scale, 1.0);
     return u_albedo * texture(u_wood_texture, grain_coordinates).rgb;
@@ -91,5 +96,6 @@ void main()
     float fog = clamp((camera_distance - u_fog_start) / max(u_fog_end - u_fog_start,
         minimum_weight_sum), 0.0, 1.0);
     linear_color = mix(linear_color, u_fog_color, fog);
-    fragment_color = vec4(max(linear_color, vec3(0.0)), 1.0);
+    float alpha = clamp(u_alpha, 0.0, 1.0);
+    fragment_color = vec4(max(linear_color, vec3(0.0)) * alpha, alpha);
 }

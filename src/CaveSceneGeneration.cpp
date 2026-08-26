@@ -932,6 +932,7 @@ CaveSceneData build_cave_scene(
 
     set_start_camera(scene, topology);
     scene.fingerprint = cave_scene_fingerprint(effective_seed, scene);
+    scene.elemental_visuals = build_elemental_scene(topology, effective_seed);
     const std::vector<std::string> errors{validate_cave_scene(topology, scene)};
     if (!errors.empty()) {
         throw GeometryError{errors.front()};

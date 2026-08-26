@@ -23,7 +23,7 @@ inline constexpr std::array<std::uint32_t, 4> rock_octave_weights{8U, 4U, 2U, 1U
 inline constexpr std::array<std::uint32_t, 3> wood_lattice_sizes{8U, 16U, 32U};
 inline constexpr std::array<std::uint32_t, 3> wood_octave_weights{4U, 2U, 1U};
 
-enum class MaterialKind : std::uint8_t { rock, wood };
+enum class MaterialKind : std::uint8_t { rock, wood, untextured };
 enum class TextureFormat : std::uint8_t { r8_linear, srgb8 };
 enum class TextureWrap : std::uint8_t { repeat };
 enum class TextureFilter : std::uint8_t { linear };
@@ -90,7 +90,12 @@ struct FogParameters {
 };
 
 enum class CullMode : std::uint8_t { none, back };
-enum class BlendMode : std::uint8_t { disabled, straight_alpha };
+enum class BlendMode : std::uint8_t {
+    disabled,
+    straight_alpha,
+    premultiplied_alpha,
+    additive,
+};
 
 struct RenderPassState {
     bool framebuffer_srgb{};
@@ -102,6 +107,12 @@ struct RenderPassState {
 
 inline constexpr RenderPassState opaque_render_pass{
     true, true, true, CullMode::back, BlendMode::disabled};
+inline constexpr RenderPassState emissive_render_pass{
+    true, true, true, CullMode::back, BlendMode::disabled};
+inline constexpr RenderPassState transparent_effect_render_pass{
+    true, true, false, CullMode::none, BlendMode::premultiplied_alpha};
+inline constexpr RenderPassState additive_effect_render_pass{
+    true, true, false, CullMode::none, BlendMode::additive};
 inline constexpr RenderPassState ui_render_pass{
     false, false, false, CullMode::none, BlendMode::straight_alpha};
 

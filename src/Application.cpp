@@ -14,6 +14,7 @@
 
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_inverse.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <glm/mat3x3.hpp>
 #include <glm/mat4x4.hpp>
 #include <glm/vec3.hpp>
@@ -67,6 +68,14 @@ void apply_render_pass_state(const RenderPassState& state)
         glEnable(GL_BLEND);
         glBlendEquation(GL_FUNC_ADD);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    } else if (state.blend_mode == BlendMode::premultiplied_alpha) {
+        glEnable(GL_BLEND);
+        glBlendEquation(GL_FUNC_ADD);
+        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    } else if (state.blend_mode == BlendMode::additive) {
+        glEnable(GL_BLEND);
+        glBlendEquation(GL_FUNC_ADD);
+        glBlendFunc(GL_ONE, GL_ONE);
     } else {
         glDisable(GL_BLEND);
     }
@@ -97,9 +106,23 @@ public:
           rock_texture_(generate_rock_texture(effective_seed, rock_texture_stable_id)),
           wood_texture_(generate_wood_texture(effective_seed, wood_texture_stable_id))
     {
+        elemental_visuals_ = &scene.elemental_visuals;
         pieces_.reserve(scene.mesh_pieces.size());
         for (const SceneMeshPiece& piece : scene.mesh_pieces) {
             pieces_.push_back({piece.material, piece.albedo, std::make_unique<GpuMesh>(piece.mesh)});
+        }
+        elemental_pieces_.reserve(
+            scene.elemental_visuals.opaque_draw_call_count
+            + scene.elemental_visuals.transparent_effect_draw_count);
+        for (const ElementalChamberVisual& chamber : scene.elemental_visuals.chambers) {
+            elemental_pieces_.push_back(
+                {&chamber.pedestal, std::make_unique<GpuMesh>(chamber.pedestal.mesh)});
+            elemental_pieces_.push_back(
+                {&chamber.crystal, std::make_unique<GpuMesh>(chamber.crystal.mesh)});
+            for (const ElementalVisualPiece& decoration : chamber.decorations) {
+                elemental_pieces_.push_back(
+                    {&decoration, std::make_unique<GpuMesh>(decoration.mesh)});
+            }
         }
         shader_program_.use();
         shader_program_.set_integer("u_rock_texture", 0);
@@ -111,70 +134,93 @@ public:
         }
         std::cout << "Procedural materials uploaded once\n"
                   << "  Rock texture: " << format_fingerprint(rock_texture_.fingerprint()) << '\n'
-                  << "  Wood texture: " << format_fingerprint(wood_texture_.fingerprint()) << '\n';
+                  << "  Wood texture: " << format_fingerprint(wood_texture_.fingerprint()) << '\n'
+                  << "  Elemental meshes: " << elemental_pieces_.size() << '\n'
+                  << "  Elemental fingerprint: "
+                  << format_fingerprint(scene.elemental_visuals.fingerprint) << '\n';
     }
 
     void render(
         const glm::mat4& view,
         const glm::mat4& projection,
         const glm::vec3& camera_position,
-        const std::uint64_t stable_zone_id)
+        const std::uint64_t stable_zone_id,
+        const float elapsed_seconds)
     {
-        const glm::mat4 model{1.0F};
-        const glm::mat3 normal_matrix{glm::inverseTranspose(glm::mat3{model})};
         const PointLight lantern{camera_lantern(
             {camera_position.x, camera_position.y, camera_position.z})};
+        std::vector<StableLightCandidate> candidates;
+        candidates.reserve(elemental_visuals_->chambers.size());
+        for (const ElementalChamberVisual& chamber : elemental_visuals_->chambers) {
+            candidates.push_back({
+                crystal_point_light(chamber, elapsed_seconds),
+                chamber.chamber_id.value == stable_zone_id,
+            });
+        }
+        const std::vector<PointLight> lights{select_point_lights(lantern, candidates)};
         const FogParameters fog{fog_parameters_for_zone(stable_zone_id)};
 
         shader_program_.use();
         rock_texture_.bind(0U);
         wood_texture_.bind(1U);
-        shader_program_.set_matrix("u_model", model);
         shader_program_.set_matrix("u_view", view);
         shader_program_.set_matrix("u_projection", projection);
-        shader_program_.set_matrix("u_normal_matrix", normal_matrix);
         shader_program_.set_vector("u_camera_position", camera_position);
-        shader_program_.set_integer("u_point_light_count", 1);
-        shader_program_.set_vector("u_point_lights[0].position", glm::vec3{
-            lantern.position_metres[0], lantern.position_metres[1], lantern.position_metres[2]});
-        shader_program_.set_vector("u_point_lights[0].color", glm::vec3{
-            lantern.color_linear[0], lantern.color_linear[1], lantern.color_linear[2]});
-        shader_program_.set_float("u_point_lights[0].intensity", lantern.intensity);
-        shader_program_.set_float(
-            "u_point_lights[0].attenuation_constant", lantern.attenuation_constant);
-        shader_program_.set_float(
-            "u_point_lights[0].attenuation_linear", lantern.attenuation_linear);
-        shader_program_.set_float(
-            "u_point_lights[0].attenuation_quadratic", lantern.attenuation_quadratic);
-        shader_program_.set_float("u_point_lights[0].range_metres", lantern.range_metres);
+        shader_program_.set_integer(
+            "u_point_light_count", static_cast<int>(lights.size()));
+        for (std::size_t index{}; index < lights.size(); ++index) {
+            const PointLight& light{lights[index]};
+            const std::string prefix{
+                "u_point_lights[" + std::to_string(index) + "]."};
+            shader_program_.set_vector(prefix + "position", glm::vec3{
+                light.position_metres[0], light.position_metres[1],
+                light.position_metres[2]});
+            shader_program_.set_vector(prefix + "color", glm::vec3{
+                light.color_linear[0], light.color_linear[1], light.color_linear[2]});
+            shader_program_.set_float(prefix + "intensity", light.intensity);
+            shader_program_.set_float(
+                prefix + "attenuation_constant", light.attenuation_constant);
+            shader_program_.set_float(
+                prefix + "attenuation_linear", light.attenuation_linear);
+            shader_program_.set_float(
+                prefix + "attenuation_quadratic", light.attenuation_quadratic);
+            shader_program_.set_float(prefix + "range_metres", light.range_metres);
+        }
         shader_program_.set_vector("u_fog_color", glm::vec3{
             fog.color_linear[0], fog.color_linear[1], fog.color_linear[2]});
         shader_program_.set_float("u_fog_start", fog.start_distance_metres);
         shader_program_.set_float("u_fog_end", fog.end_distance_metres);
 
+        apply_render_pass_state(opaque_render_pass);
+        set_model(glm::mat4{1.0F});
         for (const RenderPiece& piece : pieces_) {
-            const MaterialParameters material{material_parameters(piece.material)};
-            validate_material_parameters(material);
-            shader_program_.set_integer("u_material_kind", static_cast<int>(piece.material));
-            shader_program_.set_vector(
-                "u_albedo",
-                {piece.albedo[0], piece.albedo[1], piece.albedo[2]});
-            shader_program_.set_vector("u_material_ambient", glm::vec3{
-                material.ambient[0], material.ambient[1], material.ambient[2]});
-            shader_program_.set_vector("u_material_diffuse", glm::vec3{
-                material.diffuse[0], material.diffuse[1], material.diffuse[2]});
-            shader_program_.set_vector("u_material_specular", glm::vec3{
-                material.specular[0], material.specular[1], material.specular[2]});
-            shader_program_.set_vector("u_material_emission", glm::vec3{
-                material.emission[0], material.emission[1], material.emission[2]});
-            shader_program_.set_float("u_material_shininess", material.shininess);
-            shader_program_.set_float("u_texture_scale", material.texture_scale);
-            shader_program_.set_float("u_triplanar_sharpness", material.triplanar_sharpness);
+            set_material(piece.material, piece.albedo, {0.0F, 0.0F, 0.0F}, 1.0F);
             piece.mesh->draw();
         }
+
+        render_elemental_layer(ElementalRenderLayer::opaque, opaque_render_pass,
+            elapsed_seconds);
+        render_elemental_layer(ElementalRenderLayer::emissive, emissive_render_pass,
+            elapsed_seconds);
+
+        apply_render_pass_state(transparent_effect_render_pass);
+        const std::vector<std::size_t> transparent_indices{
+            sorted_transparent_piece_indices(*elemental_visuals_,
+                {camera_position.x, camera_position.y, camera_position.z})};
+        for (const std::size_t index : transparent_indices) {
+            if (index >= elemental_pieces_.size()
+                || elemental_pieces_[index].contract->layer
+                    != ElementalRenderLayer::transparent) {
+                throw std::runtime_error(
+                    "Transparent elemental ordering disagrees with uploaded meshes.");
+            }
+            draw_elemental(elemental_pieces_[index], elapsed_seconds);
+        }
+        render_elemental_layer(ElementalRenderLayer::additive,
+            additive_effect_render_pass, elapsed_seconds);
 #if !defined(NDEBUG)
         if (!first_frame_validated_) {
-            require_no_opengl_error("the first generated cave draw");
+            require_no_opengl_error("the first elemental cave draw");
             first_frame_validated_ = true;
         }
 #endif
@@ -187,10 +233,85 @@ private:
         std::unique_ptr<GpuMesh> mesh{};
     };
 
+    struct ElementalRenderPiece {
+        const ElementalVisualPiece* contract{};
+        std::unique_ptr<GpuMesh> mesh{};
+    };
+
+    void set_model(const glm::mat4& model)
+    {
+        shader_program_.set_matrix("u_model", model);
+        shader_program_.set_matrix(
+            "u_normal_matrix", glm::inverseTranspose(glm::mat3{model}));
+    }
+
+    void set_material(
+        const MaterialKind kind,
+        const std::array<float, 3>& albedo,
+        const std::array<float, 3>& emission,
+        const float alpha)
+    {
+        const MaterialParameters material{material_parameters(kind)};
+        validate_material_parameters(material);
+        shader_program_.set_integer("u_material_kind", static_cast<int>(kind));
+        shader_program_.set_vector("u_albedo", {albedo[0], albedo[1], albedo[2]});
+        shader_program_.set_vector("u_material_ambient", glm::vec3{
+            material.ambient[0], material.ambient[1], material.ambient[2]});
+        shader_program_.set_vector("u_material_diffuse", glm::vec3{
+            material.diffuse[0], material.diffuse[1], material.diffuse[2]});
+        shader_program_.set_vector("u_material_specular", glm::vec3{
+            material.specular[0], material.specular[1], material.specular[2]});
+        shader_program_.set_vector(
+            "u_material_emission", {emission[0], emission[1], emission[2]});
+        shader_program_.set_float("u_material_shininess", material.shininess);
+        shader_program_.set_float("u_texture_scale", material.texture_scale);
+        shader_program_.set_float("u_triplanar_sharpness", material.triplanar_sharpness);
+        shader_program_.set_float("u_alpha", alpha);
+    }
+
+    void draw_elemental(
+        const ElementalRenderPiece& render_piece,
+        const float elapsed_seconds)
+    {
+        const ElementalVisualPiece& piece{*render_piece.contract};
+        const ElementalTransformSample transform{
+            sample_elemental_transform(piece, elapsed_seconds)};
+        glm::mat4 model{1.0F};
+        model = glm::translate(model, {
+            static_cast<float>(transform.position_metres.x),
+            static_cast<float>(transform.position_metres.y),
+            static_cast<float>(transform.position_metres.z)});
+        model = glm::rotate(model, transform.rotation_y_radians, {0.0F, 1.0F, 0.0F});
+        model = glm::scale(model, glm::vec3{transform.uniform_scale});
+        set_model(model);
+        const std::array<float, 3> albedo{linear_color(piece.albedo)};
+        std::array<float, 3> emission{linear_color(piece.emission)};
+        for (float& component : emission) {
+            component *= transform.emission_multiplier;
+        }
+        set_material(piece.material, albedo, emission, piece.alpha_milli / 1'000.0F);
+        render_piece.mesh->draw();
+    }
+
+    void render_elemental_layer(
+        const ElementalRenderLayer layer,
+        const RenderPassState& state,
+        const float elapsed_seconds)
+    {
+        apply_render_pass_state(state);
+        for (const ElementalRenderPiece& piece : elemental_pieces_) {
+            if (piece.contract->layer == layer) {
+                draw_elemental(piece, elapsed_seconds);
+            }
+        }
+    }
+
     ShaderProgram shader_program_;
     GpuTexture rock_texture_;
     GpuTexture wood_texture_;
     std::vector<RenderPiece> pieces_{};
+    const ElementalSceneData* elemental_visuals_{};
+    std::vector<ElementalRenderPiece> elemental_pieces_{};
 #if !defined(NDEBUG)
     bool first_frame_validated_{};
 #endif
@@ -273,7 +394,7 @@ void Application::initialize_window()
     window_ = glfwCreateWindow(
         initial_window_width,
         initial_window_height,
-        "Crystalbound - Phong Cave Exploration",
+        "Crystalbound - Elemental Cave Exploration",
         nullptr,
         nullptr);
     if (window_ == nullptr) {
@@ -359,7 +480,8 @@ void Application::run_frame_loop()
             / static_cast<float>(framebuffer_height_);
         render_resources_->render(
             camera_.view_matrix(), camera_.projection_matrix(aspect_ratio), camera_.position(),
-            controller_->state().safe_chamber_id.value);
+            controller_->state().safe_chamber_id.value,
+            static_cast<float>(current_time));
         apply_render_pass_state(ui_render_pass);
 
         glfwSwapBuffers(window_);

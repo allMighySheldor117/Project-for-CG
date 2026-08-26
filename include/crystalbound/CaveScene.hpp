@@ -9,6 +9,7 @@
 
 #include "crystalbound/Generation.hpp"
 #include "crystalbound/Geometry.hpp"
+#include "crystalbound/ElementalVisuals.hpp"
 #include "crystalbound/Rendering.hpp"
 
 namespace crystalbound {
@@ -83,6 +84,7 @@ struct CaveSceneData {
     std::uint32_t static_vertex_count{};
     std::uint32_t opaque_draw_call_count{};
     std::uint64_t fingerprint{};
+    ElementalSceneData elemental_visuals{};
 };
 
 struct CaveGenerationResult {

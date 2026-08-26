@@ -5,21 +5,21 @@ game. Each run builds a deterministic low-poly cave from a seed. The finished
 game will ask the player to explore its branching passages, collect five
 elemental crystals, and activate an ancient exit arch.
 
-The repository is currently at construction Step 5B. It generates complete
-chambers, curved tunnels, junctions, and at least one wooden bridge, validates
-the scene before it becomes active, uploads the accepted static meshes once,
-and renders them with a simple normal/albedo debug shader. The current camera is
-still a free-flight development camera; grounded movement and gameplay arrive
-in later steps.
+The repository is currently at construction Step 6A. It generates and validates
+complete chambers, curved tunnels, junctions, and at least one wooden bridge,
+then lets the player explore them with a deterministic grounded controller.
+Walking, sprinting, jumping, collision response, bridge traversal, falling, and
+safe-chamber respawning now work; the simple normal/albedo shader remains in
+place while visual atmosphere and game objectives are developed later.
 
 ## Run a generated cave
 
 Build and launch a reproducible scene:
 
 ```powershell
-cmake -S . -B build/step-05b -G "Visual Studio 17 2022" -A x64 -DCRYSTALBOUND_BUILD_TESTS=ON
-cmake --build build/step-05b --config Debug --target crystalbound crystalbound_tests
-.\build\step-05b\Debug\crystalbound.exe --seed 42
+cmake -S . -B build/step-06a -G "Visual Studio 17 2022" -A x64 -DCRYSTALBOUND_BUILD_TESTS=ON
+cmake --build build/step-06a --config Debug --target crystalbound crystalbound_tests
+.\build\step-06a\Debug\crystalbound.exe --seed 42
 ```
 
 Omit `--seed` to choose a requested seed from operating-system entropy. Entropy
@@ -43,7 +43,7 @@ Scene fingerprint: 9fb15c446b74730d
 Show command-line help without opening a window:
 
 ```powershell
-.\build\step-05b\Debug\crystalbound.exe --help
+.\build\step-06a\Debug\crystalbound.exe --help
 ```
 
 ## Current scene
@@ -74,13 +74,15 @@ outward prop winding, traversal clearances, and spatial separation.
 | --- | --- |
 | `W` / `S` | Move forward / backward |
 | `A` / `D` | Move left / right |
-| `Space` / `Ctrl` | Move up / down |
-| `Shift` | Temporarily increase movement speed |
+| `Shift` | Sprint while held |
+| `Space` | Jump while grounded |
 | Mouse | Look around while captured |
 | `Esc` | Release or recapture the mouse |
 
-Close the application with the window close button. The camera starts in the
-Start chamber facing one of its portals.
+Close the application with the window close button. The player starts grounded
+in the Start chamber facing one of its portals. Looking up or down never changes
+the ground movement direction, and there is no public vertical free-flight
+mode.
 
 ## Rendering and geometry pipeline
 
@@ -90,6 +92,17 @@ Start chamber facing one of its portals.
   normals so winding, seams, and surface orientation remain easy to inspect.
 - CPU scene construction is independent of GLFW and OpenGL, so generation and
   validation run in the test harness without a window or graphics context.
+- A CPU-only collision world is derived from the same canonical chamber and
+  route contracts as the rendered scene. Analytic chamber regions and sampled
+  tunnel or bridge corridors remain separate from rendering triangles.
+- The controller advances at a fixed 120 Hz, clamps long frame deltas, limits
+  catch-up work, and uses conservative movement substeps for deterministic wall
+  collision and sliding.
+- The physical capsule owns player position and vertical velocity. The camera
+  follows at the locked eye height while retaining independent mouse yaw and
+  pitch.
+- Entering a chamber updates a safe checkpoint. Fall regions and the cave kill
+  plane return the player to that checkpoint with unsafe velocity cleared.
 - Centripetal Catmull-Rom sampling enforces maximum spacing, chord error,
   overshoot, grade, and curvature constraints.
 - The checked mesh builder emits positions, unit normals, UV-ready coordinates,
@@ -114,24 +127,25 @@ packages are already installed.
 ## Build, test, and install
 
 ```powershell
-cmake -S . -B build/step-05b -G "Visual Studio 17 2022" -A x64 -DCRYSTALBOUND_BUILD_TESTS=ON
-cmake --build build/step-05b --config Debug --target crystalbound crystalbound_tests
-ctest --test-dir build/step-05b -C Debug --output-on-failure
-cmake --build build/step-05b --config Release --target crystalbound crystalbound_tests
-ctest --test-dir build/step-05b -C Release --output-on-failure
-cmake --install build/step-05b --config Release --prefix build/install-05b
+cmake -S . -B build/step-06a -G "Visual Studio 17 2022" -A x64 -DCRYSTALBOUND_BUILD_TESTS=ON
+cmake --build build/step-06a --config Debug --target crystalbound crystalbound_tests
+ctest --test-dir build/step-06a -C Debug --output-on-failure
+cmake --install build/step-06a --config Debug --prefix build/install-06a-debug
+cmake --build build/step-06a --config Release --target crystalbound crystalbound_tests
+ctest --test-dir build/step-06a -C Release --output-on-failure
+cmake --install build/step-06a --config Release --prefix build/install-06a
 ```
 
 Run the dependency-free CPU harness directly to see every named case:
 
 ```powershell
-.\build\step-05b\Debug\crystalbound_tests.exe .\build\step-05b\Debug\testdata
+.\build\step-06a\Debug\crystalbound_tests.exe .\build\step-06a\Debug\testdata
 ```
 
 Run the installed executable from any working directory:
 
 ```powershell
-.\build\install-05b\crystalbound.exe --seed 42
+.\build\install-06a\crystalbound.exe --seed 42
 ```
 
 Build-tree and installed executables resolve shaders and other runtime resources
@@ -146,12 +160,13 @@ hashes, and licenses are recorded in `third_party/manifest.lock`,
 
 ## Automated checks
 
-`crystalbound_tests` runs 48 deterministic CPU cases without a window or OpenGL
-context. They cover the earlier mesh, camera, topology, spline, and frame
-contracts plus complete scene generation, repeatability and variation, the
-accepted-scene golden fingerprint, bridge and collider guarantees, portal seams,
-geometry budgets, validation failures, checked fallback behavior, and atomic
-failure when even fallback geometry is invalid.
+`crystalbound_tests` runs 63 deterministic CPU cases without a window or OpenGL
+context. In addition to the mesh, camera, topology, spline, geometry, generation,
+and fallback contracts, the suite covers locked player dimensions, walk and
+sprint speeds, normalized yaw-relative movement, fixed-step behavior, frame
+spikes, gravity, jumping, ceilings, slopes, steps, wall sliding, tunneling
+prevention, chamber and route seams, bridge decks and rails, checkpoints, fall
+respawning, generated collision data, and invalid inputs.
 
 GitHub Actions builds, tests, and installs on Windows/Visual Studio 2022 and
 Linux/Ninja. CI also rejects tracked `plans/` content and first-party CMake
@@ -159,7 +174,8 @@ downloads. GPU rendering remains a manual check.
 
 ## Current limitations
 
-Step 5B is a geometry and debug-rendering milestone, not a playable build.
-Grounded collision response, jumping, crystal collection, elemental art,
+Step 6A provides cave navigation, not the complete game loop. Mechanical
+reachability validation and generation retries based on player traversal belong
+to Step 6B and are not implemented here. Crystal collection, elemental art,
 Phong lighting, procedural materials, fog, the exit arch, timer, and game UI
-are intentionally not implemented yet.
+also remain intentionally out of scope.

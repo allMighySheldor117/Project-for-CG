@@ -112,6 +112,11 @@ const glm::vec3& Camera::position() const noexcept
     return position_;
 }
 
+const glm::vec3& Camera::forward() const noexcept
+{
+    return front_;
+}
+
 void Camera::update_basis()
 {
     const float yaw = glm::radians(yaw_degrees_);

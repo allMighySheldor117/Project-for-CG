@@ -19,6 +19,11 @@
 #include <glm/mat4x4.hpp>
 #include <glm/vec3.hpp>
 
+#include <imgui.h>
+#include <imgui_impl_glfw.h>
+#include <imgui_impl_opengl3.h>
+
+#include "crystalbound/CrystalCollection.hpp"
 #include "crystalbound/GpuMesh.hpp"
 #include "crystalbound/GpuTexture.hpp"
 #include "crystalbound/Rendering.hpp"
@@ -144,21 +149,17 @@ public:
         const glm::mat4& view,
         const glm::mat4& projection,
         const glm::vec3& camera_position,
-        const std::uint64_t stable_zone_id,
-        const float elapsed_seconds)
+        const NodeId stable_zone_id,
+        const float elapsed_seconds,
+        const CrystalCollectionState& collection)
     {
         const PointLight lantern{camera_lantern(
             {camera_position.x, camera_position.y, camera_position.z})};
-        std::vector<StableLightCandidate> candidates;
-        candidates.reserve(elemental_visuals_->chambers.size());
-        for (const ElementalChamberVisual& chamber : elemental_visuals_->chambers) {
-            candidates.push_back({
-                crystal_point_light(chamber, elapsed_seconds),
-                chamber.chamber_id.value == stable_zone_id,
-            });
-        }
+        const std::vector<StableLightCandidate> candidates{
+            active_crystal_lights(
+                *elemental_visuals_, collection, stable_zone_id, elapsed_seconds)};
         const std::vector<PointLight> lights{select_point_lights(lantern, candidates)};
-        const FogParameters fog{fog_parameters_for_zone(stable_zone_id)};
+        const FogParameters fog{fog_parameters_for_zone(stable_zone_id.value)};
 
         shader_program_.use();
         rock_texture_.bind(0U);
@@ -199,9 +200,9 @@ public:
         }
 
         render_elemental_layer(ElementalRenderLayer::opaque, opaque_render_pass,
-            elapsed_seconds);
+            elapsed_seconds, collection);
         render_elemental_layer(ElementalRenderLayer::emissive, emissive_render_pass,
-            elapsed_seconds);
+            elapsed_seconds, collection);
 
         apply_render_pass_state(transparent_effect_render_pass);
         const std::vector<std::size_t> transparent_indices{
@@ -217,7 +218,7 @@ public:
             draw_elemental(elemental_pieces_[index], elapsed_seconds);
         }
         render_elemental_layer(ElementalRenderLayer::additive,
-            additive_effect_render_pass, elapsed_seconds);
+            additive_effect_render_pass, elapsed_seconds, collection);
 #if !defined(NDEBUG)
         if (!first_frame_validated_) {
             require_no_opengl_error("the first elemental cave draw");
@@ -296,11 +297,13 @@ private:
     void render_elemental_layer(
         const ElementalRenderLayer layer,
         const RenderPassState& state,
-        const float elapsed_seconds)
+        const float elapsed_seconds,
+        const CrystalCollectionState& collection)
     {
         apply_render_pass_state(state);
         for (const ElementalRenderPiece& piece : elemental_pieces_) {
-            if (piece.contract->layer == layer) {
+            if (piece.contract->layer == layer
+                && is_elemental_piece_visible(*piece.contract, collection)) {
                 draw_elemental(piece, elapsed_seconds);
             }
         }
@@ -347,6 +350,9 @@ void Application::initialize()
          static_cast<float>(forward.z)});
     controller_ = std::make_unique<GroundedController>(
         build_collision_world(generation_.scene), find_start_spawn(generation_));
+    interaction_targets_ = build_crystal_interaction_targets(
+        generation_.scene.elemental_visuals);
+    visibility_world_ = build_crystal_visibility_world(generation_.scene);
     const GeometryVector3 camera_position{controller_->camera_position_metres()};
     camera_.set_position({
         static_cast<float>(camera_position.x),
@@ -362,6 +368,20 @@ void Application::initialize()
     glfwSetCursorPosCallback(window_, cursor_position_callback);
     glfwSetKeyCallback(window_, key_callback);
     set_mouse_captured(true);
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGui::StyleColorsDark();
+    if (!ImGui_ImplGlfw_InitForOpenGL(window_, true)) {
+        ImGui::DestroyContext();
+        throw std::runtime_error("Dear ImGui GLFW initialization failed.");
+    }
+    if (!ImGui_ImplOpenGL3_Init("#version 330")) {
+        ImGui_ImplGlfw_Shutdown();
+        ImGui::DestroyContext();
+        throw std::runtime_error("Dear ImGui OpenGL initialization failed.");
+    }
+    imgui_initialized_ = true;
 
     render_resources_ = std::make_unique<RenderResources>(
         resources / "shaders", generation_.scene, generation_.generation.effective_seed);
@@ -467,6 +487,7 @@ void Application::run_frame_loop()
         previous_time = current_time;
 
         process_movement(static_cast<float>(elapsed));
+        process_crystal_interaction();
 
         if (framebuffer_width_ <= 0 || framebuffer_height_ <= 0) {
             glfwWaitEventsTimeout(0.05);
@@ -480,9 +501,15 @@ void Application::run_frame_loop()
             / static_cast<float>(framebuffer_height_);
         render_resources_->render(
             camera_.view_matrix(), camera_.projection_matrix(aspect_ratio), camera_.position(),
-            controller_->state().safe_chamber_id.value,
-            static_cast<float>(current_time));
+            controller_->state().safe_chamber_id,
+            static_cast<float>(current_time), crystal_collection_);
         apply_render_pass_state(ui_render_pass);
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+        render_crystal_prompt();
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
         glfwSwapBuffers(window_);
         glfwPollEvents();
@@ -513,6 +540,61 @@ void Application::process_movement(const float delta_seconds)
     });
 }
 
+void Application::process_crystal_interaction()
+{
+    const glm::vec3& position{camera_.position()};
+    const glm::vec3& forward{camera_.forward()};
+    const CameraInteractionQuery query{
+        {position.x, position.y, position.z},
+        {forward.x, forward.y, forward.z},
+    };
+    const bool pressed_edge{
+        interaction_button_.update(key_is_down(window_, GLFW_KEY_E))};
+    FocusedCrystalResult focus{focus_crystal(
+        interaction_targets_, query, visibility_world_, crystal_collection_)};
+    if (mouse_captured_ && pressed_edge) {
+        const CollectionAttemptResult result{attempt_crystal_collection(
+            interaction_targets_, query, visibility_world_, true,
+            crystal_collection_)};
+        if (result.collected && result.element.has_value()) {
+            std::cout << "Collected the " << element_name(*result.element)
+                      << " Crystal (" << crystal_collection_.collected_count()
+                      << '/' << elemental_order.size() << ")\n";
+            focus = focus_crystal(
+                interaction_targets_, query, visibility_world_, crystal_collection_);
+        }
+    }
+    focused_crystal_ = mouse_captured_ ? focus.focused : std::nullopt;
+}
+
+void Application::render_crystal_prompt()
+{
+    if (!focused_crystal_.has_value()) {
+        return;
+    }
+    const std::string prompt{
+        "Press E to collect the "
+        + std::string{element_name(focused_crystal_->target.element)}
+        + " Crystal"};
+    const ImGuiIO& io{ImGui::GetIO()};
+    ImGui::SetNextWindowPos(
+        {io.DisplaySize.x * 0.5F, io.DisplaySize.y * 0.82F},
+        ImGuiCond_Always,
+        {0.5F, 0.5F});
+    ImGui::SetNextWindowBgAlpha(0.62F);
+    constexpr ImGuiWindowFlags prompt_flags{
+        ImGuiWindowFlags_NoDecoration
+        | ImGuiWindowFlags_AlwaysAutoResize
+        | ImGuiWindowFlags_NoSavedSettings
+        | ImGuiWindowFlags_NoFocusOnAppearing
+        | ImGuiWindowFlags_NoNav
+        | ImGuiWindowFlags_NoInputs};
+    if (ImGui::Begin("Crystal interaction prompt", nullptr, prompt_flags)) {
+        ImGui::TextUnformatted(prompt.c_str());
+    }
+    ImGui::End();
+}
+
 void Application::set_mouse_captured(const bool captured)
 {
     mouse_captured_ = captured;
@@ -526,6 +608,12 @@ void Application::shutdown() noexcept
     if (window_ != nullptr) {
         if (glfwGetCurrentContext() != window_) {
             glfwMakeContextCurrent(window_);
+        }
+        if (imgui_initialized_) {
+            ImGui_ImplOpenGL3_Shutdown();
+            ImGui_ImplGlfw_Shutdown();
+            ImGui::DestroyContext();
+            imgui_initialized_ = false;
         }
         render_resources_.reset();
         glfwDestroyWindow(window_);

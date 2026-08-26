@@ -427,6 +427,9 @@ void append_oriented_box(
         static_cast<double>(route.bridge_width_millimetres) / millimetres_per_metre / 2.0};
     const double rail_height{
         static_cast<double>(route.bridge_rail_height_millimetres) / millimetres_per_metre};
+    constexpr double plank_half_thickness{0.08};
+    const double deck_surface_offset{
+        static_cast<double>(route.spline.radius_millimetres) / millimetres_per_metre};
     for (std::size_t index{}; index + 1U < frames.size(); ++index) {
         const GeometryVector3 segment{subtract(
             frames[index + 1U].position_metres,
@@ -437,14 +440,17 @@ void append_oriented_box(
         const GeometryVector3 side{normalized(cross(tangent, up), "Bridge plank side")};
         const GeometryVector3 route_midpoint{multiply(
             add(frames[index].position_metres, frames[index + 1U].position_metres), 0.5)};
-        const GeometryVector3 deck_center{add(route_midpoint, multiply(up, -0.92))};
+        const GeometryVector3 deck_center{add(
+            route_midpoint,
+            multiply(up, -(deck_surface_offset + plank_half_thickness)))};
         append_oriented_box(
             builder,
             deck_center,
             side,
             up,
             tangent,
-            {half_width, 0.08, std::max(0.02, segment_length * 0.47)});
+            {half_width, plank_half_thickness,
+             std::max(0.02, segment_length * 0.47)});
 
         for (const double direction : {-1.0, 1.0}) {
             const GeometryVector3 rail_center{add(

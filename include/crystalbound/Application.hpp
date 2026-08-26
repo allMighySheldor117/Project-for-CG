@@ -4,6 +4,7 @@
 
 #include "crystalbound/Camera.hpp"
 #include "crystalbound/CaveScene.hpp"
+#include "crystalbound/PlayerController.hpp"
 
 struct GLFWwindow;
 
@@ -52,6 +53,8 @@ private:
     int framebuffer_height_{};
     Camera camera_{};
     CaveGenerationResult generation_{};
+    std::unique_ptr<GroundedController> controller_{};
+    bool backlog_warning_emitted_{};
     std::unique_ptr<RenderResources> render_resources_{};
 };
 

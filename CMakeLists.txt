@@ -92,6 +92,7 @@ add_library(crystalbound_core STATIC
     src/GeometryValidation.cpp
     src/MeshData.cpp
     src/ObjLoader.cpp
+    src/PlayerController.cpp
     src/TopologyFingerprint.cpp
     src/TopologyGeneration.cpp
     src/TopologyValidation.cpp
@@ -173,6 +174,7 @@ if(CRYSTALBOUND_BUILD_TESTS)
         tests/unit/CaveSceneTests.cpp
         tests/unit/GeometryTests.cpp
         tests/unit/GenerationTests.cpp
+        tests/unit/PlayerControllerTests.cpp
         tests/unit/TestMain.cpp
     )
     target_compile_features(crystalbound_tests PRIVATE cxx_std_17)

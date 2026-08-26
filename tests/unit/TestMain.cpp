@@ -18,6 +18,7 @@
 #include "GeometryTests.hpp"
 #include "CaveSceneTests.hpp"
 #include "GenerationTests.hpp"
+#include "PlayerControllerTests.hpp"
 
 namespace {
 
@@ -366,6 +367,10 @@ int main(const int argument_count, char* arguments[])
     const std::vector<TestCase> cave_scene_tests{
         crystalbound::test::cave_scene_test_cases()};
     tests.insert(tests.end(), cave_scene_tests.begin(), cave_scene_tests.end());
+    const std::vector<TestCase> player_controller_tests{
+        crystalbound::test::player_controller_test_cases()};
+    tests.insert(
+        tests.end(), player_controller_tests.begin(), player_controller_tests.end());
 
     std::size_t failures{};
     for (const TestCase& test : tests) {

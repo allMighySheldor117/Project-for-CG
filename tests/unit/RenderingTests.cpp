@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "crystalbound/CaveScene.hpp"
+#include "crystalbound/DeterministicRandom.hpp"
 #include "crystalbound/Rendering.hpp"
 
 namespace crystalbound::test {
@@ -136,6 +137,20 @@ void rock_fbm_octaves_and_weights_are_locked(const std::filesystem::path&)
         "rock lattice sizes changed");
     require(rock_octave_weights == std::array<std::uint32_t, 4>{8U, 4U, 2U, 1U},
         "rock octave weights changed");
+
+    SplitMix64 first{make_substream(42U, random_domain::materials, rock_texture_stable_id)};
+    SplitMix64 second{make_substream(42U, random_domain::materials, rock_texture_stable_id)};
+    SplitMix64 changed{make_substream(42U, random_domain::materials, rock_texture_stable_id + 1U)};
+    bool changed_id_varied{};
+    for (std::size_t index{}; index < 16U; ++index) {
+        const std::uint16_t first_high_bits{static_cast<std::uint16_t>(first.next() >> 48U)};
+        const std::uint16_t second_high_bits{static_cast<std::uint16_t>(second.next() >> 48U)};
+        const std::uint16_t changed_high_bits{static_cast<std::uint16_t>(changed.next() >> 48U)};
+        require(first_high_bits == second_high_bits,
+            "material substream changed high-16-bit lattice values");
+        changed_id_varied = changed_id_varied || first_high_bits != changed_high_bits;
+    }
+    require(changed_id_varied, "material substream ignored the stable object ID");
 }
 
 void rock_texture_is_repeatable_and_object_specific(const std::filesystem::path&)
@@ -365,7 +380,7 @@ std::vector<TestCase> rendering_test_cases()
         {"invalid value-noise lattice is rejected", invalid_noise_lattice_is_rejected},
         {"rock FBm octaves and weights are locked", rock_fbm_octaves_and_weights_are_locked},
         {"rock texture is repeatable and object-specific", rock_texture_is_repeatable_and_object_specific},
-        {"rock texture matches golden bytes", rock_texture_matches_golden_bytes},
+        {"rock texture matches row-major golden bytes", rock_texture_matches_golden_bytes},
         {"wood octaves, anisotropy, and band are locked", wood_octaves_anisotropy_and_band_are_locked},
         {"wood palette and blend formula are locked", wood_palette_and_blend_formula_are_locked},
         {"wood texture is repeatable and bounded", wood_texture_is_repeatable_and_bounded},

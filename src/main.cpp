@@ -25,10 +25,11 @@ int run_application(crystalbound::CaveGenerationResult generation)
 void print_usage()
 {
     std::cout
-        << "Crystalbound generated-cave development build\n"
+        << "Crystalbound lit-cave development build\n"
         << "Usage: crystalbound [--seed <uint64>]\n\n"
         << "The current build generates and displays a deterministic low-poly cave\n"
-        << "with curved tunnels, elevation, and a wooden bridge.\n"
+        << "with curved tunnels, a wooden bridge, Phong lighting, procedural materials,\n"
+        << "a warm camera lantern, and distance fog.\n"
         << "Options:\n"
         << "  --seed <uint64>  Use a strict unsigned decimal requested seed.\n"
         << "  -h, --help       Show this help text without opening a window.\n";

@@ -1,6 +1,9 @@
 #pragma once
 
 #include <filesystem>
+#include <functional>
+#include <map>
+#include <string>
 #include <string_view>
 
 #include <glm/mat3x3.hpp>
@@ -32,6 +35,7 @@ private:
     [[nodiscard]] int uniform_location(std::string_view name) const;
 
     unsigned int program_id_{};
+    mutable std::map<std::string, int, std::less<>> uniform_locations_{};
 };
 
 }  // namespace crystalbound

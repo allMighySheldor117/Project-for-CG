@@ -512,7 +512,9 @@ void append_piece(
     }
     scene.static_vertex_count += static_cast<std::uint32_t>(mesh.vertices.size());
     ++scene.opaque_draw_call_count;
-    scene.mesh_pieces.push_back({kind, stable_id, std::move(mesh), bounds, albedo});
+    const MaterialKind material{
+        kind == ScenePieceKind::bridge ? MaterialKind::wood : MaterialKind::rock};
+    scene.mesh_pieces.push_back({kind, stable_id, std::move(mesh), bounds, material, albedo});
 }
 
 [[nodiscard]] ChamberGeometryContract make_chamber_contract(

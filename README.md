@@ -5,21 +5,22 @@ game. Each run builds a deterministic low-poly cave from a seed. The finished
 game will ask the player to explore its branching passages, collect five
 elemental crystals, and activate an ancient exit arch.
 
-The repository is currently at construction Step 6A. It generates and validates
-complete chambers, curved tunnels, junctions, and at least one wooden bridge,
-then lets the player explore them with a deterministic grounded controller.
-Walking, sprinting, jumping, collision response, bridge traversal, falling, and
-safe-chamber respawning now work; the simple normal/albedo shader remains in
-place while visual atmosphere and game objectives are developed later.
+The repository is currently at construction Step 6B. It generates complete
+chambers, curved tunnels, junctions, and at least one wooden bridge, validates
+that the grounded player can mechanically reach every required chamber, and
+only then publishes the cave for exploration. Walking, sprinting, jumping,
+collision response, bridge traversal, falling, and safe-chamber respawning
+remain available; the simple normal/albedo shader remains in place while visual
+atmosphere and game objectives are developed later.
 
 ## Run a generated cave
 
 Build and launch a reproducible scene:
 
 ```powershell
-cmake -S . -B build/step-06a -G "Visual Studio 17 2022" -A x64 -DCRYSTALBOUND_BUILD_TESTS=ON
-cmake --build build/step-06a --config Debug --target crystalbound crystalbound_tests
-.\build\step-06a\Debug\crystalbound.exe --seed 42
+cmake -S . -B build/step-06b -G "Visual Studio 17 2022" -A x64 -DCRYSTALBOUND_BUILD_TESTS=ON
+cmake --build build/step-06b --config Debug --target crystalbound crystalbound_tests
+.\build\step-06b\Debug\crystalbound.exe --seed 42
 ```
 
 Omit `--seed` to choose a requested seed from operating-system entropy. Entropy
@@ -27,13 +28,14 @@ is used only for that initial choice; the cave itself comes from the specified
 SplitMix64 implementation and stable domain substreams.
 
 Generation is atomic. A candidate must pass topology, spline, geometry,
-separation, collider, and budget checks before it can be displayed. Rejected
-candidates are reported and retried deterministically, with a revalidated
-known-good fallback after eight normal attempts. The startup diagnostic prints
-the requested, attempted, and effective seeds, every attempt outcome, fallback
-state, and canonical topology and scene fingerprints.
+separation, collider, budget, and mechanical-reachability checks before it can
+be displayed. Rejected candidates are reported and retried deterministically,
+with a fully revalidated known-good fallback after exactly eight normal
+attempts. The startup diagnostic prints the requested, attempted, and effective
+seeds, every attempt outcome, fallback state, canonical topology and scene
+fingerprints, and the accepted mechanical report summary.
 
-Seed `42` currently accepts a normal candidate and produces this Step 5B scene
+Seed `42` accepts a normal candidate and keeps the existing Step 5B scene
 fingerprint:
 
 ```text
@@ -43,7 +45,7 @@ Scene fingerprint: 9fb15c446b74730d
 Show command-line help without opening a window:
 
 ```powershell
-.\build\step-06a\Debug\crystalbound.exe --help
+.\build\step-06b\Debug\crystalbound.exe --help
 ```
 
 ## Current scene
@@ -95,6 +97,16 @@ mode.
 - A CPU-only collision world is derived from the same canonical chamber and
   route contracts as the rendered scene. Analytic chamber regions and sampled
   tunnel or bridge corridors remain separate from rendering triangles.
+- A stable directed traversal graph is derived from that collision world.
+  Topology alone never makes a route traversable: the validator checks each
+  direction independently using exact integer clearance, slope, step, gap,
+  landing, and seam measurements.
+- Start must mechanically reach all five elemental chambers, Exit, and Neutral
+  whenever it exists. Every guaranteed-loop route and wooden bridge must be
+  usable in both directions, preserving two alternatives around the loop.
+- Each chamber respawn is checked for finite capsule clearance, grounded support,
+  fall-region and kill-plane safety, stable repeated queries, and its intended
+  stable chamber identity.
 - The controller advances at a fixed 120 Hz, clamps long frame deltas, limits
   catch-up work, and uses conservative movement substeps for deterministic wall
   collision and sliding.
@@ -127,25 +139,25 @@ packages are already installed.
 ## Build, test, and install
 
 ```powershell
-cmake -S . -B build/step-06a -G "Visual Studio 17 2022" -A x64 -DCRYSTALBOUND_BUILD_TESTS=ON
-cmake --build build/step-06a --config Debug --target crystalbound crystalbound_tests
-ctest --test-dir build/step-06a -C Debug --output-on-failure
-cmake --install build/step-06a --config Debug --prefix build/install-06a-debug
-cmake --build build/step-06a --config Release --target crystalbound crystalbound_tests
-ctest --test-dir build/step-06a -C Release --output-on-failure
-cmake --install build/step-06a --config Release --prefix build/install-06a
+cmake -S . -B build/step-06b -G "Visual Studio 17 2022" -A x64 -DCRYSTALBOUND_BUILD_TESTS=ON
+cmake --build build/step-06b --config Debug --target crystalbound crystalbound_tests
+ctest --test-dir build/step-06b -C Debug --output-on-failure
+cmake --install build/step-06b --config Debug --prefix build/install-06b-debug
+cmake --build build/step-06b --config Release --target crystalbound crystalbound_tests
+ctest --test-dir build/step-06b -C Release --output-on-failure
+cmake --install build/step-06b --config Release --prefix build/install-06b
 ```
 
 Run the dependency-free CPU harness directly to see every named case:
 
 ```powershell
-.\build\step-06a\Debug\crystalbound_tests.exe .\build\step-06a\Debug\testdata
+.\build\step-06b\Debug\crystalbound_tests.exe .\build\step-06b\Debug\testdata
 ```
 
 Run the installed executable from any working directory:
 
 ```powershell
-.\build\install-06a\crystalbound.exe --seed 42
+.\build\install-06b\crystalbound.exe --seed 42
 ```
 
 Build-tree and installed executables resolve shaders and other runtime resources
@@ -160,13 +172,20 @@ hashes, and licenses are recorded in `third_party/manifest.lock`,
 
 ## Automated checks
 
-`crystalbound_tests` runs 63 deterministic CPU cases without a window or OpenGL
-context. In addition to the mesh, camera, topology, spline, geometry, generation,
-and fallback contracts, the suite covers locked player dimensions, walk and
-sprint speeds, normalized yaw-relative movement, fixed-step behavior, frame
-spikes, gravity, jumping, ceilings, slopes, steps, wall sliding, tunneling
-prevention, chamber and route seams, bridge decks and rails, checkpoints, fall
-respawning, generated collision data, and invalid inputs.
+`crystalbound_tests` runs 95 deterministic CPU cases without a window or OpenGL
+context. The original 63 cases remain. The 32 Step 6B cases add successful
+reports, stable directed graphs, required and Neutral reachability, loop
+alternatives, bidirectional routes and bridges, seam failures, safe respawns,
+exact movement-envelope boundaries, deterministic typed diagnostics, mechanical
+retry and fallback behavior, atomic invalid-fallback failure, repeated complete
+acceptance, and a bounded five-seed corpus.
+
+Seed `42` is the normal-acceptance example. Seed `123456789` is the checked
+fallback example: its eight normal candidates are rejected by existing geometry
+contracts before the fallback independently passes topology, geometry,
+collision, and mechanical validation. The CI corpus is intentionally bounded to
+`1`, `2`, `3`, `42`, and `123456789`; exhaustive procedural soak testing
+belongs to a later construction step.
 
 GitHub Actions builds, tests, and installs on Windows/Visual Studio 2022 and
 Linux/Ninja. CI also rejects tracked `plans/` content and first-party CMake
@@ -174,8 +193,7 @@ downloads. GPU rendering remains a manual check.
 
 ## Current limitations
 
-Step 6A provides cave navigation, not the complete game loop. Mechanical
-reachability validation and generation retries based on player traversal belong
-to Step 6B and are not implemented here. Crystal collection, elemental art,
-Phong lighting, procedural materials, fog, the exit arch, timer, and game UI
-also remain intentionally out of scope.
+Step 6B provides mechanically validated cave navigation, not the complete game
+loop. Crystal collection, elemental art, Phong lighting, procedural materials,
+fog, the exit arch, timer, game-state screens, sound, and maps remain
+intentionally out of scope.

@@ -79,6 +79,15 @@ void Camera::set_pose(const glm::vec3& position, const glm::vec3& forward)
     update_basis();
 }
 
+void Camera::set_position(const glm::vec3& position)
+{
+    if (!std::isfinite(position.x) || !std::isfinite(position.y)
+        || !std::isfinite(position.z)) {
+        throw std::invalid_argument("Camera position must be finite.");
+    }
+    position_ = position;
+}
+
 glm::mat4 Camera::view_matrix() const
 {
     return glm::lookAt(position_, position_ + front_, up_);
@@ -91,6 +100,11 @@ glm::mat4 Camera::projection_matrix(const float aspect_ratio) const
     }
     return glm::perspective(
         glm::radians(vertical_field_of_view), aspect_ratio, near_plane, far_plane);
+}
+
+float Camera::yaw_degrees() const noexcept
+{
+    return yaw_degrees_;
 }
 
 void Camera::update_basis()

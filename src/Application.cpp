@@ -25,7 +25,6 @@ namespace {
 
 constexpr int initial_window_width{1280};
 constexpr int initial_window_height{720};
-constexpr double maximum_frame_delta{0.1};
 constexpr float background_red{0.08F};
 constexpr float background_green{0.09F};
 constexpr float background_blue{0.12F};
@@ -135,6 +134,14 @@ void Application::initialize()
          static_cast<float>(position.z)},
         {static_cast<float>(forward.x), static_cast<float>(forward.y),
          static_cast<float>(forward.z)});
+    controller_ = std::make_unique<GroundedController>(
+        build_collision_world(generation_.scene), find_start_spawn(generation_));
+    const GeometryVector3 camera_position{controller_->camera_position_metres()};
+    camera_.set_position({
+        static_cast<float>(camera_position.x),
+        static_cast<float>(camera_position.y),
+        static_cast<float>(camera_position.z),
+    });
 
     initialize_window();
     initialize_opengl();
@@ -151,6 +158,8 @@ void Application::initialize()
               << "  Mesh pieces: " << generation_.scene.mesh_pieces.size() << '\n'
               << "  Static vertices: " << generation_.scene.static_vertex_count << '\n'
               << "  Colliders: " << generation_.scene.colliders.size() << '\n'
+              << "  Grounded start chamber: "
+              << controller_->state().safe_chamber_id.value << '\n'
               << "  Scene fingerprint: "
               << format_fingerprint(generation_.scene.fingerprint) << '\n';
 }
@@ -173,7 +182,7 @@ void Application::initialize_window()
     window_ = glfwCreateWindow(
         initial_window_width,
         initial_window_height,
-        "Crystalbound - Generated Cave Scene",
+        "Crystalbound - Grounded Cave Traversal",
         nullptr,
         nullptr);
     if (window_ == nullptr) {
@@ -235,7 +244,7 @@ void Application::run_frame_loop()
     double previous_time = glfwGetTime();
     while (glfwWindowShouldClose(window_) == GLFW_FALSE) {
         const double current_time = glfwGetTime();
-        const double elapsed = std::clamp(current_time - previous_time, 0.0, maximum_frame_delta);
+        const double elapsed = std::max(0.0, current_time - previous_time);
         previous_time = current_time;
 
         process_movement(static_cast<float>(elapsed));
@@ -259,19 +268,26 @@ void Application::run_frame_loop()
 
 void Application::process_movement(const float delta_seconds)
 {
-    CameraMovementInput input{};
+    GroundedMovementInput input{};
     input.forward = (key_is_down(window_, GLFW_KEY_W) ? 1.0F : 0.0F)
         - (key_is_down(window_, GLFW_KEY_S) ? 1.0F : 0.0F);
     input.right = (key_is_down(window_, GLFW_KEY_D) ? 1.0F : 0.0F)
         - (key_is_down(window_, GLFW_KEY_A) ? 1.0F : 0.0F);
-    input.vertical = (key_is_down(window_, GLFW_KEY_SPACE) ? 1.0F : 0.0F)
-        - ((key_is_down(window_, GLFW_KEY_LEFT_CONTROL)
-               || key_is_down(window_, GLFW_KEY_RIGHT_CONTROL))
-                ? 1.0F
-                : 0.0F);
-    input.boosted = key_is_down(window_, GLFW_KEY_LEFT_SHIFT)
+    input.view_yaw_degrees = camera_.yaw_degrees();
+    input.jump = key_is_down(window_, GLFW_KEY_SPACE);
+    input.sprint = key_is_down(window_, GLFW_KEY_LEFT_SHIFT)
         || key_is_down(window_, GLFW_KEY_RIGHT_SHIFT);
-    camera_.move(input, delta_seconds);
+    const ControllerAdvanceResult result{controller_->advance(input, delta_seconds)};
+    if (result.backlog_discarded && !backlog_warning_emitted_) {
+        std::cerr << "Controller warning: discarded excess fixed-step backlog.\n";
+        backlog_warning_emitted_ = true;
+    }
+    const GeometryVector3 camera_position{controller_->camera_position_metres()};
+    camera_.set_position({
+        static_cast<float>(camera_position.x),
+        static_cast<float>(camera_position.y),
+        static_cast<float>(camera_position.z),
+    });
 }
 
 void Application::set_mouse_captured(const bool captured)

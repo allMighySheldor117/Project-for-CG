@@ -19,9 +19,11 @@ public:
     void move(const CameraMovementInput& input, float delta_seconds);
     void rotate(float horizontal_delta, float vertical_delta);
     void set_pose(const glm::vec3& position, const glm::vec3& forward);
+    void set_position(const glm::vec3& position);
 
     [[nodiscard]] glm::mat4 view_matrix() const;
     [[nodiscard]] glm::mat4 projection_matrix(float aspect_ratio) const;
+    [[nodiscard]] float yaw_degrees() const noexcept;
 
 private:
     void update_basis();

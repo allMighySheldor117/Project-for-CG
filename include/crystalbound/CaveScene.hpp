@@ -86,14 +86,21 @@ struct CaveSceneData {
 struct CaveGenerationResult {
     GenerationResult generation{};
     CaveSceneData scene{};
+    MechanicalReachabilityReport reachability{};
 };
 
 using CaveSceneAttemptRejection = std::function<std::optional<std::string>(
     std::uint32_t attempt_index,
     const CaveSceneData& scene)>;
 
+using MechanicalAttemptRejection = std::function<std::optional<ReachabilityIssue>(
+    std::uint32_t attempt_index,
+    bool fallback,
+    const MechanicalReachabilityReport& report)>;
+
 struct CaveGenerationTestSeams {
     CaveSceneAttemptRejection reject_attempt{};
+    MechanicalAttemptRejection reject_mechanical{};
     FallbackFactory fallback_factory{};
 };
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <stdexcept>
@@ -47,6 +48,20 @@ struct RouteCollisionRegion {
     double usable_half_width_metres{};
     double tunnel_radius_metres{};
     double rail_height_metres{};
+    std::int32_t clearance_width_millimetres{};
+    std::int32_t clearance_height_millimetres{};
+    std::int32_t maximum_slope_millidegrees{};
+
+    struct DirectedMeasurements {
+        std::int32_t maximum_step_up_millimetres{};
+        std::int32_t maximum_gap_millimetres{};
+        std::int32_t minimum_landing_width_millimetres{};
+        bool chamber_to_junction_supported{};
+        bool junction_to_route_supported{};
+        bool route_to_chamber_supported{};
+    };
+
+    std::array<DirectedMeasurements, 2> directed{};
 };
 
 struct FallCollisionRegion {

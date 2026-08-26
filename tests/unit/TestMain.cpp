@@ -18,6 +18,7 @@
 #include "GeometryTests.hpp"
 #include "CaveSceneTests.hpp"
 #include "ElementalVisualsTests.hpp"
+#include "CrystalCollectionTests.hpp"
 #include "GenerationTests.hpp"
 #include "PlayerControllerTests.hpp"
 #include "ReachabilityTests.hpp"
@@ -384,6 +385,10 @@ int main(const int argument_count, char* arguments[])
         crystalbound::test::elemental_visuals_test_cases()};
     tests.insert(
         tests.end(), elemental_visuals_tests.begin(), elemental_visuals_tests.end());
+    const std::vector<TestCase> crystal_collection_tests{
+        crystalbound::test::crystal_collection_test_cases()};
+    tests.insert(
+        tests.end(), crystal_collection_tests.begin(), crystal_collection_tests.end());
 
     std::size_t failures{};
     for (const TestCase& test : tests) {

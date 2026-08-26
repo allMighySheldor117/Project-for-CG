@@ -93,6 +93,7 @@ add_library(crystalbound_core STATIC
     src/MeshData.cpp
     src/ObjLoader.cpp
     src/PlayerController.cpp
+    src/Reachability.cpp
     src/TopologyFingerprint.cpp
     src/TopologyGeneration.cpp
     src/TopologyValidation.cpp
@@ -175,6 +176,7 @@ if(CRYSTALBOUND_BUILD_TESTS)
         tests/unit/GeometryTests.cpp
         tests/unit/GenerationTests.cpp
         tests/unit/PlayerControllerTests.cpp
+        tests/unit/ReachabilityTests.cpp
         tests/unit/TestMain.cpp
     )
     target_compile_features(crystalbound_tests PRIVATE cxx_std_17)

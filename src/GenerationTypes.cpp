@@ -32,6 +32,45 @@ bool operator<(const Edge& left, const Edge& right) noexcept
         || (left.first == right.first && left.second < right.second);
 }
 
+bool operator==(const ReachabilityIssue& left, const ReachabilityIssue& right) noexcept
+{
+    return left.failure == right.failure && left.chamber_id == right.chamber_id
+        && left.edge == right.edge && left.direction == right.direction
+        && left.stable_object_id == right.stable_object_id;
+}
+
+bool operator==(
+    const DirectedRouteTraversal& left,
+    const DirectedRouteTraversal& right) noexcept
+{
+    return left.edge == right.edge && left.from == right.from && left.to == right.to
+        && left.direction == right.direction
+        && left.stable_object_id == right.stable_object_id && left.bridge == right.bridge
+        && left.traversable == right.traversable && left.failures == right.failures;
+}
+
+bool operator==(
+    const ChamberRespawnVerdict& left,
+    const ChamberRespawnVerdict& right) noexcept
+{
+    return left.chamber_id == right.chamber_id
+        && left.stable_object_id == right.stable_object_id && left.safe == right.safe
+        && left.failures == right.failures;
+}
+
+bool operator==(
+    const MechanicalReachabilityReport& left,
+    const MechanicalReachabilityReport& right) noexcept
+{
+    return left.accepted == right.accepted
+        && left.start_chamber == right.start_chamber
+        && left.reachable_chambers == right.reachable_chambers
+        && left.required_unreachable_chambers == right.required_unreachable_chambers
+        && left.directed_routes == right.directed_routes
+        && left.respawns == right.respawns && left.issues == right.issues
+        && left.diagnostics == right.diagnostics;
+}
+
 Edge make_edge(const NodeId left, const NodeId right) noexcept
 {
     return right < left ? Edge{right, left} : Edge{left, right};

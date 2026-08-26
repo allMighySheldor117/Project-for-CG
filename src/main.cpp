@@ -46,6 +46,12 @@ void print_generation_diagnostic(const crystalbound::CaveGenerationResult& resul
               << crystalbound::format_fingerprint(topology.fingerprint) << '\n'
               << "  Scene fingerprint: "
               << crystalbound::format_fingerprint(result.scene.fingerprint) << '\n'
+              << "  Mechanical reachability: "
+              << (result.reachability.accepted ? "accepted" : "rejected") << '\n'
+              << "  Reachable chambers: "
+              << result.reachability.reachable_chambers.size() << '\n'
+              << "  Directed route traversals: "
+              << result.reachability.directed_routes.size() << '\n'
               << "  Fallback: " << (topology.used_fallback ? "yes" : "no") << '\n'
               << "  Attempts:\n";
     for (const crystalbound::GenerationDiagnostic& diagnostic : topology.diagnostics) {

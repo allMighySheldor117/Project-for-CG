@@ -19,6 +19,91 @@ constexpr double ground_tolerance_metres{0.05};
 constexpr double maximum_horizontal_substep_metres{0.10};
 constexpr double comparison_tolerance{1.0e-9};
 
+[[nodiscard]] std::int32_t maximum_sample_slope_millidegrees(
+    const std::vector<SplineSample>& samples)
+{
+    double maximum_radians{};
+    for (std::size_t index{}; index + 1U < samples.size(); ++index) {
+        const GeometryVector3& first{samples[index].position_metres};
+        const GeometryVector3& second{samples[index + 1U].position_metres};
+        const double horizontal{std::hypot(second.x - first.x, second.z - first.z)};
+        const double radians{std::atan2(std::abs(second.y - first.y), horizontal)};
+        if (!std::isfinite(radians)) {
+            throw ControllerError{"Collision route has a non-finite slope."};
+        }
+        maximum_radians = std::max(maximum_radians, radians);
+    }
+    const double millidegrees{maximum_radians * 180'000.0 / pi};
+    if (millidegrees > static_cast<double>(std::numeric_limits<std::int32_t>::max())) {
+        throw ControllerError{"Collision route slope cannot be represented."};
+    }
+    return static_cast<std::int32_t>(std::lround(millidegrees));
+}
+
+[[nodiscard]] const ChamberGeometryContract& scene_chamber(
+    const CaveSceneData& scene,
+    const NodeId chamber_id)
+{
+    const auto found = std::find_if(
+        scene.chambers.begin(), scene.chambers.end(),
+        [chamber_id](const ChamberGeometryContract& chamber) {
+            return chamber.node_id == chamber_id;
+        });
+    if (found == scene.chambers.end()) {
+        throw ControllerError{"Collision route references a missing chamber contract."};
+    }
+    return *found;
+}
+
+[[nodiscard]] bool has_route_portal(
+    const CaveSceneData& scene,
+    const NodeId chamber_id,
+    const Edge edge,
+    const IntegerPoint3& endpoint)
+{
+    return std::any_of(
+        scene.portals.begin(), scene.portals.end(),
+        [&](const PortalContract& portal) {
+            return portal.chamber_id == chamber_id && portal.route == edge
+                && portal.center_millimetres == endpoint;
+        });
+}
+
+[[nodiscard]] RouteCollisionRegion::DirectedMeasurements directed_measurements(
+    const CaveSceneData& scene,
+    const RouteGeometryContract& route,
+    const RouteDirection direction,
+    const std::int32_t landing_width_millimetres)
+{
+    const bool forward{direction == RouteDirection::first_to_second};
+    const NodeId from_id{forward ? route.edge.first : route.edge.second};
+    const NodeId to_id{forward ? route.edge.second : route.edge.first};
+    const IntegerPoint3& from_endpoint{
+        forward ? route.spline.control_points.front() : route.spline.control_points.back()};
+    const IntegerPoint3& to_endpoint{
+        forward ? route.spline.control_points.back() : route.spline.control_points.front()};
+    const ChamberGeometryContract& from{scene_chamber(scene, from_id)};
+    const ChamberGeometryContract& to{scene_chamber(scene, to_id)};
+    const std::int32_t from_route_floor{
+        from_endpoint.y_millimetres - route.spline.radius_millimetres};
+    const std::int32_t to_route_floor{
+        to_endpoint.y_millimetres - route.spline.radius_millimetres};
+    const std::int32_t entry_step{
+        std::max(0, from_route_floor - from.center_millimetres.y_millimetres)};
+    const std::int32_t exit_step{
+        std::max(0, to.center_millimetres.y_millimetres - to_route_floor)};
+    const bool from_portal{has_route_portal(scene, from_id, route.edge, from_endpoint)};
+    const bool to_portal{has_route_portal(scene, to_id, route.edge, to_endpoint)};
+    return {
+        std::max(entry_step, exit_step),
+        0,
+        landing_width_millimetres,
+        from_portal,
+        from_portal,
+        to_portal,
+    };
+}
+
 [[nodiscard]] bool finite_vector(const GeometryVector3& value) noexcept
 {
     return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
@@ -274,16 +359,36 @@ CollisionWorld build_collision_world(const CaveSceneData& scene)
                         / millimetres_per_metre / 2.0
                     - capsule.radius_metres - safety_margin
                 : route_radius - capsule.radius_metres - safety_margin};
+        std::vector<SplineSample> samples{
+            sample_centripetal_catmull_rom(route.spline)};
+        const std::int32_t clearance_width{route.bridge
+                ? route.bridge_width_millimetres
+                : route.spline.radius_millimetres * 2};
+        const std::int32_t clearance_height{route.bridge
+                ? movement_envelope.minimum_clearance_height_millimetres
+                    + movement_envelope.safety_margin_millimetres
+                : route.spline.radius_millimetres * 2};
         world.routes.push_back({
             route.edge,
             stable_edge_id(route.edge),
             route.bridge ? GroundContactKind::bridge : GroundContactKind::tunnel,
-            sample_centripetal_catmull_rom(route.spline),
+            std::move(samples),
             half_width,
             route_radius,
             static_cast<double>(route.bridge_rail_height_millimetres)
                 / millimetres_per_metre,
+            clearance_width,
+            clearance_height,
+            0,
+            {
+                directed_measurements(
+                    scene, route, RouteDirection::first_to_second, clearance_width),
+                directed_measurements(
+                    scene, route, RouteDirection::second_to_first, clearance_width),
+            },
         });
+        world.routes.back().maximum_slope_millidegrees =
+            maximum_sample_slope_millidegrees(world.routes.back().samples);
     }
 
     for (const SceneCollider& collider : scene.colliders) {

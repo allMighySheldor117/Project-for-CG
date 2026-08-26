@@ -106,6 +106,86 @@ struct Edge {
     NodeId second{};
 };
 
+enum class RouteDirection : std::uint8_t {
+    first_to_second,
+    second_to_first,
+};
+
+enum class ReachabilityFailure : std::uint8_t {
+    missing_start,
+    multiple_starts,
+    invalid_collision_world,
+    missing_chamber_collision,
+    missing_route_collision,
+    non_finite_collision_data,
+    insufficient_clearance_width,
+    insufficient_clearance_height,
+    excessive_slope,
+    excessive_step,
+    excessive_gap,
+    insufficient_landing_width,
+    unsupported_chamber_junction_seam,
+    unsupported_junction_route_seam,
+    unsupported_route_chamber_seam,
+    unsafe_bridge,
+    unsafe_respawn,
+    unstable_respawn,
+    unreachable_required_chamber,
+    protected_route_not_bidirectional,
+    guaranteed_loop_invalid,
+};
+
+struct ReachabilityIssue {
+    ReachabilityFailure failure{ReachabilityFailure::invalid_collision_world};
+    std::optional<NodeId> chamber_id{};
+    std::optional<Edge> edge{};
+    std::optional<RouteDirection> direction{};
+    std::uint64_t stable_object_id{};
+};
+
+bool operator==(const ReachabilityIssue& left, const ReachabilityIssue& right) noexcept;
+
+struct DirectedRouteTraversal {
+    Edge edge{};
+    NodeId from{};
+    NodeId to{};
+    RouteDirection direction{RouteDirection::first_to_second};
+    std::uint64_t stable_object_id{};
+    bool bridge{};
+    bool traversable{};
+    std::vector<ReachabilityFailure> failures{};
+};
+
+bool operator==(
+    const DirectedRouteTraversal& left,
+    const DirectedRouteTraversal& right) noexcept;
+
+struct ChamberRespawnVerdict {
+    NodeId chamber_id{};
+    std::uint64_t stable_object_id{};
+    bool safe{};
+    std::vector<ReachabilityFailure> failures{};
+};
+
+bool operator==(
+    const ChamberRespawnVerdict& left,
+    const ChamberRespawnVerdict& right) noexcept;
+
+struct MechanicalReachabilityReport {
+    bool accepted{};
+    std::optional<NodeId> start_chamber{};
+    std::vector<NodeId> reachable_chambers{};
+    std::vector<NodeId> required_unreachable_chambers{};
+    std::vector<DirectedRouteTraversal> directed_routes{};
+    std::vector<ChamberRespawnVerdict> respawns{};
+    std::vector<ReachabilityIssue> issues{};
+    std::vector<std::string> diagnostics{};
+};
+
+bool operator==(
+    const MechanicalReachabilityReport& left,
+    const MechanicalReachabilityReport& right) noexcept;
+
 bool operator==(const Edge& left, const Edge& right) noexcept;
 bool operator!=(const Edge& left, const Edge& right) noexcept;
 bool operator<(const Edge& left, const Edge& right) noexcept;
@@ -182,6 +262,7 @@ struct GenerationDiagnostic {
     Seed attempt_seed{};
     AttemptOutcome outcome{AttemptOutcome::rejected};
     std::string message{};
+    std::optional<ReachabilityIssue> mechanical_failure{};
 };
 
 struct GenerationResult {

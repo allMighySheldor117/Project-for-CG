@@ -19,6 +19,7 @@
 #include "CaveSceneTests.hpp"
 #include "GenerationTests.hpp"
 #include "PlayerControllerTests.hpp"
+#include "ReachabilityTests.hpp"
 
 namespace {
 
@@ -371,6 +372,9 @@ int main(const int argument_count, char* arguments[])
         crystalbound::test::player_controller_test_cases()};
     tests.insert(
         tests.end(), player_controller_tests.begin(), player_controller_tests.end());
+    const std::vector<TestCase> reachability_tests{
+        crystalbound::test::reachability_test_cases()};
+    tests.insert(tests.end(), reachability_tests.begin(), reachability_tests.end());
 
     std::size_t failures{};
     for (const TestCase& test : tests) {

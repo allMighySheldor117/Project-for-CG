@@ -16,6 +16,7 @@
 #include "crystalbound/MeshData.hpp"
 #include "crystalbound/ObjLoader.hpp"
 #include "GeometryTests.hpp"
+#include "GameLoopTests.hpp"
 #include "CaveSceneTests.hpp"
 #include "ElementalVisualsTests.hpp"
 #include "CrystalCollectionTests.hpp"
@@ -389,6 +390,9 @@ int main(const int argument_count, char* arguments[])
         crystalbound::test::crystal_collection_test_cases()};
     tests.insert(
         tests.end(), crystal_collection_tests.begin(), crystal_collection_tests.end());
+    const std::vector<TestCase> game_loop_tests{
+        crystalbound::test::game_loop_test_cases()};
+    tests.insert(tests.end(), game_loop_tests.begin(), game_loop_tests.end());
 
     std::size_t failures{};
     for (const TestCase& test : tests) {

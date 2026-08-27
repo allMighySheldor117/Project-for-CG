@@ -87,6 +87,8 @@ add_library(crystalbound_core STATIC
     src/CrystalCollection.cpp
     src/DeterministicRandom.cpp
     src/ElementalVisuals.cpp
+    src/ExitArch.cpp
+    src/GameLoop.cpp
     src/Generation.cpp
     src/GenerationTypes.cpp
     src/GeometryFingerprint.cpp
@@ -181,6 +183,7 @@ if(CRYSTALBOUND_BUILD_TESTS)
         tests/unit/ElementalVisualsTests.cpp
         tests/unit/GeometryTests.cpp
         tests/unit/GenerationTests.cpp
+        tests/unit/GameLoopTests.cpp
         tests/unit/PlayerControllerTests.cpp
         tests/unit/ReachabilityTests.cpp
         tests/unit/RenderingTests.cpp

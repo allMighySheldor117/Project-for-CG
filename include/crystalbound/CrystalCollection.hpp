@@ -105,7 +105,7 @@ struct CollectionAttemptResult {
 class RisingEdgeButton final {
 public:
     [[nodiscard]] bool update(bool down) noexcept;
-    void reset() noexcept;
+    void reset(bool down = false) noexcept;
 
 private:
     bool previous_down_{};

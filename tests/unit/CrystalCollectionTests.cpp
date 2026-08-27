@@ -119,6 +119,11 @@ void one_time_collection_and_edge_are_enforced(const std::filesystem::path&)
     require(!button.update(true) && !button.update(true), "held E repeated");
     require(!button.update(false) && button.update(true),
         "release and re-press did not create an edge");
+    button.reset(true);
+    require(!button.update(true),
+        "held E repeated after a game-state transition");
+    require(!button.update(false) && button.update(true),
+        "transition-synchronized E did not recover after release");
 
     CrystalCollectionState state;
     const auto crystal{target(Element::fire, 7U, {0.0, 0.0, -1.0})};

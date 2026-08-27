@@ -383,9 +383,9 @@ bool RisingEdgeButton::update(const bool down) noexcept
     return rising_edge;
 }
 
-void RisingEdgeButton::reset() noexcept
+void RisingEdgeButton::reset(const bool down) noexcept
 {
-    previous_down_ = false;
+    previous_down_ = down;
 }
 
 std::vector<CrystalInteractionTarget> build_crystal_interaction_targets(

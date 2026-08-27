@@ -2,9 +2,12 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <filesystem>
+#include <iomanip>
 #include <iostream>
 #include <memory>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -38,6 +41,19 @@ constexpr int initial_window_height{720};
 constexpr float background_red{0.08F};
 constexpr float background_green{0.09F};
 constexpr float background_blue{0.12F};
+
+[[nodiscard]] std::string format_elapsed_time(const double elapsed_seconds)
+{
+    const double safe_seconds{std::max(0.0, elapsed_seconds)};
+    const auto total_centiseconds{static_cast<std::uint64_t>(safe_seconds * 100.0)};
+    const std::uint64_t minutes{total_centiseconds / 6'000U};
+    const std::uint64_t seconds{(total_centiseconds / 100U) % 60U};
+    const std::uint64_t centiseconds{total_centiseconds % 100U};
+    std::ostringstream formatted;
+    formatted << std::setfill('0') << std::setw(2) << minutes << ':'
+              << std::setw(2) << seconds << '.' << std::setw(2) << centiseconds;
+    return formatted.str();
+}
 
 [[nodiscard]] const char* opengl_string(const unsigned int name)
 {
@@ -104,6 +120,7 @@ public:
     RenderResources(
         const std::filesystem::path& shader_directory,
         const CaveSceneData& scene,
+        const ExitArchData& exit_arch,
         const Seed effective_seed)
         : shader_program_(
               shader_directory / "cave_phong.vert",
@@ -111,7 +128,8 @@ public:
           rock_texture_(generate_rock_texture(effective_seed, rock_texture_stable_id)),
           wood_texture_(generate_wood_texture(effective_seed, wood_texture_stable_id))
     {
-        elemental_visuals_ = &scene.elemental_visuals;
+        elemental_visuals_ = scene.elemental_visuals;
+        exit_arch_ = exit_arch;
         pieces_.reserve(scene.mesh_pieces.size());
         for (const SceneMeshPiece& piece : scene.mesh_pieces) {
             pieces_.push_back({piece.material, piece.albedo, std::make_unique<GpuMesh>(piece.mesh)});
@@ -119,7 +137,7 @@ public:
         elemental_pieces_.reserve(
             scene.elemental_visuals.opaque_draw_call_count
             + scene.elemental_visuals.transparent_effect_draw_count);
-        for (const ElementalChamberVisual& chamber : scene.elemental_visuals.chambers) {
+        for (const ElementalChamberVisual& chamber : elemental_visuals_.chambers) {
             elemental_pieces_.push_back(
                 {&chamber.pedestal, std::make_unique<GpuMesh>(chamber.pedestal.mesh)});
             elemental_pieces_.push_back(
@@ -128,6 +146,13 @@ public:
                 elemental_pieces_.push_back(
                     {&decoration, std::make_unique<GpuMesh>(decoration.mesh)});
             }
+        }
+        exit_stone_mesh_ = std::make_unique<GpuMesh>(exit_arch_.stone_mesh);
+        exit_portal_mesh_ = std::make_unique<GpuMesh>(exit_arch_.portal_mesh);
+        exit_socket_meshes_.reserve(exit_arch_.sockets.size());
+        for (const ExitSocketContract& socket : exit_arch_.sockets) {
+            exit_socket_meshes_.push_back(
+                std::make_unique<GpuMesh>(socket.crystal_mesh));
         }
         shader_program_.use();
         shader_program_.set_integer("u_rock_texture", 0);
@@ -142,7 +167,9 @@ public:
                   << "  Wood texture: " << format_fingerprint(wood_texture_.fingerprint()) << '\n'
                   << "  Elemental meshes: " << elemental_pieces_.size() << '\n'
                   << "  Elemental fingerprint: "
-                  << format_fingerprint(scene.elemental_visuals.fingerprint) << '\n';
+                  << format_fingerprint(scene.elemental_visuals.fingerprint) << '\n'
+                  << "  Exit arch fingerprint: "
+                  << format_fingerprint(exit_arch_.fingerprint) << '\n';
     }
 
     void render(
@@ -155,9 +182,19 @@ public:
     {
         const PointLight lantern{camera_lantern(
             {camera_position.x, camera_position.y, camera_position.z})};
-        const std::vector<StableLightCandidate> candidates{
+        std::vector<StableLightCandidate> candidates{
             active_crystal_lights(
-                *elemental_visuals_, collection, stable_zone_id, elapsed_seconds)};
+                elemental_visuals_, collection, stable_zone_id, elapsed_seconds)};
+        if (collection.all_collected()) {
+            const GeometryVector3& position{exit_arch_.interaction_position_metres};
+            candidates.push_back({
+                {exit_arch_.stable_object_id ^ 0x4C49474854ULL,
+                    PointLightRole::decorative,
+                    {static_cast<float>(position.x), static_cast<float>(position.y),
+                        static_cast<float>(position.z)},
+                    {0.72F, 0.24F, 1.0F}, 3.2F, 1.0F, 0.16F, 0.18F, 7.5F},
+                stable_zone_id == exit_arch_.chamber_id});
+        }
         const std::vector<PointLight> lights{select_point_lights(lantern, candidates)};
         const FogParameters fog{fog_parameters_for_zone(stable_zone_id.value)};
 
@@ -198,15 +235,23 @@ public:
             set_material(piece.material, piece.albedo, {0.0F, 0.0F, 0.0F}, 1.0F);
             piece.mesh->draw();
         }
+        set_model(glm::mat4{1.0F});
+        set_material(MaterialKind::rock, {0.20F, 0.18F, 0.24F},
+            collection.all_collected()
+                ? std::array<float, 3>{0.12F, 0.035F, 0.18F}
+                : std::array<float, 3>{0.0F, 0.0F, 0.0F},
+            1.0F);
+        exit_stone_mesh_->draw();
 
         render_elemental_layer(ElementalRenderLayer::opaque, opaque_render_pass,
             elapsed_seconds, collection);
         render_elemental_layer(ElementalRenderLayer::emissive, emissive_render_pass,
             elapsed_seconds, collection);
+        render_exit_arch(elapsed_seconds, collection);
 
         apply_render_pass_state(transparent_effect_render_pass);
         const std::vector<std::size_t> transparent_indices{
-            sorted_transparent_piece_indices(*elemental_visuals_,
+            sorted_transparent_piece_indices(elemental_visuals_,
                 {camera_position.x, camera_position.y, camera_position.z})};
         for (const std::size_t index : transparent_indices) {
             if (index >= elemental_pieces_.size()
@@ -309,20 +354,68 @@ private:
         }
     }
 
+    void render_exit_arch(
+        const float elapsed_seconds,
+        const CrystalCollectionState& collection)
+    {
+        apply_render_pass_state(emissive_render_pass);
+        const ExitArchDisplayState display{
+            exit_arch_display_state(exit_arch_, collection)};
+        for (std::size_t index{}; index < exit_arch_.sockets.size(); ++index) {
+            const ExitSocketContract& socket{exit_arch_.sockets[index]};
+            if (!display.filled.displays(socket.element)) {
+                continue;
+            }
+            const ElementalAnimationSample animation{
+                sample_elemental_animation(socket.animation, elapsed_seconds)};
+            glm::mat4 model{1.0F};
+            model = glm::translate(model, {
+                static_cast<float>(socket.position_metres.x),
+                static_cast<float>(socket.position_metres.y)
+                    + animation.vertical_offset_metres * 0.18F,
+                static_cast<float>(socket.position_metres.z)});
+            model = glm::scale(model, glm::vec3{animation.scale_multiplier});
+            set_model(model);
+            const std::array<float, 3> albedo{linear_color(socket.albedo)};
+            std::array<float, 3> emission{linear_color(socket.emission)};
+            for (float& component : emission) {
+                component *= animation.emission_multiplier;
+            }
+            set_material(MaterialKind::untextured, albedo, emission, 1.0F);
+            exit_socket_meshes_[index]->draw();
+        }
+        if (display.active) {
+            set_model(glm::mat4{1.0F});
+            set_material(MaterialKind::untextured, {0.18F, 0.055F, 0.28F},
+                {0.95F, 0.32F, 1.15F}, 1.0F);
+            exit_portal_mesh_->draw();
+        }
+    }
+
     ShaderProgram shader_program_;
     GpuTexture rock_texture_;
     GpuTexture wood_texture_;
     std::vector<RenderPiece> pieces_{};
-    const ElementalSceneData* elemental_visuals_{};
+    ElementalSceneData elemental_visuals_{};
     std::vector<ElementalRenderPiece> elemental_pieces_{};
+    ExitArchData exit_arch_{};
+    std::unique_ptr<GpuMesh> exit_stone_mesh_{};
+    std::unique_ptr<GpuMesh> exit_portal_mesh_{};
+    std::vector<std::unique_ptr<GpuMesh>> exit_socket_meshes_{};
 #if !defined(NDEBUG)
     bool first_frame_validated_{};
 #endif
 };
 
-Application::Application(CaveGenerationResult generation)
-    : generation_(std::move(generation))
+Application::Application(
+    CaveGenerationResult generation,
+    SeedSource seed_source)
+    : generation_(std::move(generation)),
+      seed_source_(std::move(seed_source))
 {
+    if (!seed_source_) {
+        throw std::invalid_argument("Application requires a New Cave seed source.");
+    }
 }
 
 Application::~Application()
@@ -353,6 +446,7 @@ void Application::initialize()
     interaction_targets_ = build_crystal_interaction_targets(
         generation_.scene.elemental_visuals);
     visibility_world_ = build_crystal_visibility_world(generation_.scene);
+    exit_arch_ = build_exit_arch(generation_);
     const GeometryVector3 camera_position{controller_->camera_position_metres()};
     camera_.set_position({
         static_cast<float>(camera_position.x),
@@ -367,7 +461,8 @@ void Application::initialize()
     glfwSetFramebufferSizeCallback(window_, framebuffer_size_callback);
     glfwSetCursorPosCallback(window_, cursor_position_callback);
     glfwSetKeyCallback(window_, key_callback);
-    set_mouse_captured(true);
+    glfwSetWindowFocusCallback(window_, window_focus_callback);
+    glfwSetWindowIconifyCallback(window_, window_iconify_callback);
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -382,9 +477,12 @@ void Application::initialize()
         throw std::runtime_error("Dear ImGui OpenGL initialization failed.");
     }
     imgui_initialized_ = true;
+    set_mouse_captured(false);
+    clear_runtime_input();
 
     render_resources_ = std::make_unique<RenderResources>(
-        resources / "shaders", generation_.scene, generation_.generation.effective_seed);
+        resources / "shaders", generation_.scene, exit_arch_,
+        generation_.generation.effective_seed);
     std::cout << "Generated cave scene\n"
               << "  Mesh pieces: " << generation_.scene.mesh_pieces.size() << '\n'
               << "  Static vertices: " << generation_.scene.static_vertex_count << '\n'
@@ -484,12 +582,14 @@ void Application::run_frame_loop()
     while (glfwWindowShouldClose(window_) == GLFW_FALSE) {
         const double current_time = glfwGetTime();
         const double elapsed = std::max(0.0, current_time - previous_time);
+        const GameTimePoint game_now{GameClock::now()};
         previous_time = current_time;
 
         process_movement(static_cast<float>(elapsed));
-        process_crystal_interaction();
+        process_interaction(game_now);
 
         if (framebuffer_width_ <= 0 || framebuffer_height_ <= 0) {
+            pause_game(game_now);
             glfwWaitEventsTimeout(0.05);
             previous_time = glfwGetTime();
             continue;
@@ -507,7 +607,7 @@ void Application::run_frame_loop()
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-        render_crystal_prompt();
+        render_game_ui(game_now);
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
@@ -518,15 +618,23 @@ void Application::run_frame_loop()
 
 void Application::process_movement(const float delta_seconds)
 {
+    if (game_session_.state() != GameState::playing) {
+        return;
+    }
     GroundedMovementInput input{};
-    input.forward = (key_is_down(window_, GLFW_KEY_W) ? 1.0F : 0.0F)
-        - (key_is_down(window_, GLFW_KEY_S) ? 1.0F : 0.0F);
-    input.right = (key_is_down(window_, GLFW_KEY_D) ? 1.0F : 0.0F)
-        - (key_is_down(window_, GLFW_KEY_A) ? 1.0F : 0.0F);
     input.view_yaw_degrees = camera_.yaw_degrees();
-    input.jump = key_is_down(window_, GLFW_KEY_SPACE);
-    input.sprint = key_is_down(window_, GLFW_KEY_LEFT_SHIFT)
-        || key_is_down(window_, GLFW_KEY_RIGHT_SHIFT);
+    if (movement_input_blocked_) {
+        movement_input_blocked_ = !gameplay_keys_released();
+    }
+    if (!movement_input_blocked_) {
+        input.forward = (key_is_down(window_, GLFW_KEY_W) ? 1.0F : 0.0F)
+            - (key_is_down(window_, GLFW_KEY_S) ? 1.0F : 0.0F);
+        input.right = (key_is_down(window_, GLFW_KEY_D) ? 1.0F : 0.0F)
+            - (key_is_down(window_, GLFW_KEY_A) ? 1.0F : 0.0F);
+        input.jump = key_is_down(window_, GLFW_KEY_SPACE);
+        input.sprint = key_is_down(window_, GLFW_KEY_LEFT_SHIFT)
+            || key_is_down(window_, GLFW_KEY_RIGHT_SHIFT);
+    }
     const ControllerAdvanceResult result{controller_->advance(input, delta_seconds)};
     if (result.backlog_discarded && !backlog_warning_emitted_) {
         std::cerr << "Controller warning: discarded excess fixed-step backlog.\n";
@@ -540,8 +648,14 @@ void Application::process_movement(const float delta_seconds)
     });
 }
 
-void Application::process_crystal_interaction()
+void Application::process_interaction(const GameTimePoint now)
 {
+    if (game_session_.state() != GameState::playing) {
+        focused_crystal_.reset();
+        focused_exit_arch_ = false;
+        interaction_button_.reset(key_is_down(window_, GLFW_KEY_E));
+        return;
+    }
     const glm::vec3& position{camera_.position()};
     const glm::vec3& forward{camera_.forward()};
     const CameraInteractionQuery query{
@@ -552,7 +666,20 @@ void Application::process_crystal_interaction()
         interaction_button_.update(key_is_down(window_, GLFW_KEY_E))};
     FocusedCrystalResult focus{focus_crystal(
         interaction_targets_, query, visibility_world_, crystal_collection_)};
-    if (mouse_captured_ && pressed_edge) {
+    ExitFocusResult exit_focus{focus_exit_arch(exit_arch_, query, visibility_world_)};
+    focused_exit_arch_ = exit_focus.focused.has_value();
+    if (mouse_captured_ && pressed_edge && focused_exit_arch_) {
+        const ExitAttemptResult result{attempt_exit_arch(
+            exit_arch_, query, visibility_world_, true, true, crystal_collection_)};
+        if (result.completed) {
+            const GameTransition transition{
+                game_session_.complete(now, current_best_key())};
+            apply_transition(transition);
+            std::cout << "Escaped the cave in "
+                      << format_elapsed_time(game_session_.elapsed_seconds(now))
+                      << '\n';
+        }
+    } else if (mouse_captured_ && pressed_edge) {
         const CollectionAttemptResult result{attempt_crystal_collection(
             interaction_targets_, query, visibility_world_, true,
             crystal_collection_)};
@@ -562,20 +689,213 @@ void Application::process_crystal_interaction()
                       << '/' << elemental_order.size() << ")\n";
             focus = focus_crystal(
                 interaction_targets_, query, visibility_world_, crystal_collection_);
+            exit_focus = focus_exit_arch(exit_arch_, query, visibility_world_);
+            focused_exit_arch_ = exit_focus.focused.has_value();
         }
     }
-    focused_crystal_ = mouse_captured_ ? focus.focused : std::nullopt;
+    focused_crystal_ = mouse_captured_ && !focused_exit_arch_
+        ? focus.focused : std::nullopt;
+    if (game_session_.state() != GameState::playing) {
+        focused_crystal_.reset();
+        focused_exit_arch_ = false;
+    }
 }
 
-void Application::render_crystal_prompt()
+void Application::render_game_ui(const GameTimePoint now)
 {
-    if (!focused_crystal_.has_value()) {
+    switch (game_session_.state()) {
+    case GameState::start:
+        render_start_ui(now);
+        break;
+    case GameState::playing:
+        render_playing_ui(now);
+        break;
+    case GameState::paused:
+        render_pause_ui(now);
+        break;
+    case GameState::completed:
+        render_completed_ui(now);
+        break;
+    }
+}
+
+void Application::render_start_ui(const GameTimePoint now)
+{
+    const ImGuiIO& io{ImGui::GetIO()};
+    ImGui::SetNextWindowPos(
+        {io.DisplaySize.x * 0.5F, io.DisplaySize.y * 0.5F},
+        ImGuiCond_Always, {0.5F, 0.5F});
+    ImGui::SetNextWindowBgAlpha(0.94F);
+    constexpr ImGuiWindowFlags flags{ImGuiWindowFlags_NoCollapse
+        | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings};
+    if (ImGui::Begin("Crystalbound", nullptr, flags)) {
+        ImGui::TextUnformatted("CRYSTALBOUND");
+        ImGui::Separator();
+        ImGui::TextWrapped(
+            "Explore a shifting elemental cave, recover its five glowing "
+            "crystals, and return them to the ancient exit arch.");
+        ImGui::Spacing();
+        ImGui::TextUnformatted("Objective");
+        ImGui::TextWrapped(
+            "Collect Fire, Water, Earth, Air, and Aether in any order, then "
+            "press E at the awakened arch to escape.");
+        ImGui::Spacing();
+        render_crystal_progress();
+        ImGui::Spacing();
+        ImGui::TextUnformatted("Controls");
+        ImGui::TextUnformatted("WASD  Move          Mouse  Look");
+        ImGui::TextUnformatted("Space Jump          Shift  Sprint");
+        ImGui::TextUnformatted("E     Interact      Esc    Pause");
+        ImGui::Spacing();
+        const std::string seed_label{
+            format_run_seed_label(generation_.generation)};
+        ImGui::Text("Seed: %s", seed_label.c_str());
+        if (!ui_error_message_.empty()) {
+            ImGui::TextColored({1.0F, 0.35F, 0.30F, 1.0F}, "%s",
+                ui_error_message_.c_str());
+        }
+        ImGui::Spacing();
+        if (ImGui::Button("Begin Exploration", {250.0F, 42.0F})) {
+            ui_error_message_.clear();
+            apply_transition(game_session_.begin_exploration(now));
+        }
+    }
+    ImGui::End();
+}
+
+void Application::render_playing_ui(const GameTimePoint now)
+{
+    ImGui::SetNextWindowPos({18.0F, 18.0F}, ImGuiCond_Always);
+    ImGui::SetNextWindowBgAlpha(0.58F);
+    constexpr ImGuiWindowFlags hud_flags{ImGuiWindowFlags_NoDecoration
+        | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings
+        | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav
+        | ImGuiWindowFlags_NoInputs};
+    if (ImGui::Begin("Run HUD", nullptr, hud_flags)) {
+        const std::string elapsed{
+            format_elapsed_time(game_session_.elapsed_seconds(now))};
+        ImGui::Text("Time  %s", elapsed.c_str());
+        render_crystal_progress();
+    }
+    ImGui::End();
+    render_interaction_prompt();
+}
+
+void Application::render_pause_ui(const GameTimePoint now)
+{
+    const ImGuiIO& io{ImGui::GetIO()};
+    ImGui::SetNextWindowPos(
+        {io.DisplaySize.x * 0.5F, io.DisplaySize.y * 0.5F},
+        ImGuiCond_Always, {0.5F, 0.5F});
+    ImGui::SetNextWindowBgAlpha(0.94F);
+    constexpr ImGuiWindowFlags flags{ImGuiWindowFlags_NoCollapse
+        | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings};
+    if (ImGui::Begin("Paused", nullptr, flags)) {
+        const std::string elapsed{
+            format_elapsed_time(game_session_.elapsed_seconds(now))};
+        const std::string seed_label{
+            format_run_seed_label(generation_.generation)};
+        ImGui::Text("Time: %s", elapsed.c_str());
+        ImGui::Text("Seed: %s", seed_label.c_str());
+        render_crystal_progress();
+        if (!ui_error_message_.empty()) {
+            ImGui::TextColored({1.0F, 0.35F, 0.30F, 1.0F}, "%s",
+                ui_error_message_.c_str());
+        }
+        ImGui::Spacing();
+        if (ImGui::Button("Resume", {220.0F, 34.0F})) {
+            ui_error_message_.clear();
+            apply_transition(game_session_.resume(now));
+        }
+        if (ImGui::Button("Restart Seed", {220.0F, 34.0F})) {
+            restart_seed();
+        }
+        if (ImGui::Button("New Cave", {220.0F, 34.0F})) {
+            new_cave();
+        }
+        if (ImGui::Button("Quit", {220.0F, 34.0F})) {
+            glfwSetWindowShouldClose(window_, GLFW_TRUE);
+        }
+    }
+    ImGui::End();
+}
+
+void Application::render_completed_ui(const GameTimePoint now)
+{
+    const ImGuiIO& io{ImGui::GetIO()};
+    ImGui::SetNextWindowPos(
+        {io.DisplaySize.x * 0.5F, io.DisplaySize.y * 0.5F},
+        ImGuiCond_Always, {0.5F, 0.5F});
+    ImGui::SetNextWindowBgAlpha(0.95F);
+    constexpr ImGuiWindowFlags flags{ImGuiWindowFlags_NoCollapse
+        | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings};
+    if (ImGui::Begin("Cave Escaped", nullptr, flags)) {
+        ImGui::TextUnformatted("THE ARCH AWAKENS");
+        ImGui::Separator();
+        const double final_seconds{game_session_.elapsed_seconds(now)};
+        const std::string final_time{format_elapsed_time(final_seconds)};
+        const std::string seed_label{
+            format_run_seed_label(generation_.generation)};
+        ImGui::Text("Final time: %s", final_time.c_str());
+        ImGui::Text("Seed: %s", seed_label.c_str());
+        render_crystal_progress();
+        const std::optional<double> best{
+            game_session_.best_seconds(current_best_key())};
+        if (best.has_value()) {
+            const std::string best_time{format_elapsed_time(*best)};
+            ImGui::Text("Session best: %s", best_time.c_str());
+        }
+        if (!ui_error_message_.empty()) {
+            ImGui::TextColored({1.0F, 0.35F, 0.30F, 1.0F}, "%s",
+                ui_error_message_.c_str());
+        }
+        ImGui::Spacing();
+        if (ImGui::Button("Play Again", {220.0F, 34.0F})) {
+            play_again();
+        }
+        if (ImGui::Button("Restart Seed", {220.0F, 34.0F})) {
+            restart_seed();
+        }
+        if (ImGui::Button("Quit", {220.0F, 34.0F})) {
+            glfwSetWindowShouldClose(window_, GLFW_TRUE);
+        }
+    }
+    ImGui::End();
+}
+
+void Application::render_crystal_progress()
+{
+    ImGui::Text("Crystals: %zu/%zu", crystal_collection_.collected_count(),
+        elemental_order.size());
+    for (std::size_t index{}; index < elemental_order.size(); ++index) {
+        const Element element{elemental_order[index]};
+        const std::array<float, 3> color{
+            linear_color(elemental_persona(element).emission)};
+        const std::string label{std::string{element_name(element)}
+            + (crystal_collection_.is_collected(element) ? " [x]" : " [ ]")};
+        ImGui::TextColored({color[0], color[1], color[2], 1.0F}, "%s",
+            label.c_str());
+        if (index + 1U < elemental_order.size()) {
+            ImGui::SameLine();
+        }
+    }
+}
+
+void Application::render_interaction_prompt()
+{
+    if (!focused_crystal_.has_value() && !focused_exit_arch_) {
         return;
     }
-    const std::string prompt{
-        "Press E to collect the "
-        + std::string{element_name(focused_crystal_->target.element)}
-        + " Crystal"};
+    std::string prompt;
+    if (focused_exit_arch_) {
+        prompt = crystal_collection_.all_collected()
+            ? "Press E to escape"
+            : "The arch needs all five crystals";
+    } else {
+        prompt = "Press E to collect the "
+            + std::string{element_name(focused_crystal_->target.element)}
+            + " Crystal";
+    }
     const ImGuiIO& io{ImGui::GetIO()};
     ImGui::SetNextWindowPos(
         {io.DisplaySize.x * 0.5F, io.DisplaySize.y * 0.82F},
@@ -589,18 +909,176 @@ void Application::render_crystal_prompt()
         | ImGuiWindowFlags_NoFocusOnAppearing
         | ImGuiWindowFlags_NoNav
         | ImGuiWindowFlags_NoInputs};
-    if (ImGui::Begin("Crystal interaction prompt", nullptr, prompt_flags)) {
+    if (ImGui::Begin("Interaction prompt", nullptr, prompt_flags)) {
         ImGui::TextUnformatted(prompt.c_str());
     }
     ImGui::End();
+}
+
+void Application::apply_transition(const GameTransition& transition)
+{
+    if (!transition.accepted) {
+        return;
+    }
+    if (transition.clear_held_input) {
+        clear_runtime_input();
+    }
+    if (transition.discard_first_mouse_delta) {
+        mouse_sample_pending_ = true;
+    }
+    if (transition.cursor == CursorRequest::capture) {
+        set_mouse_captured(true);
+    } else if (transition.cursor == CursorRequest::release) {
+        set_mouse_captured(false);
+    }
+}
+
+void Application::pause_game(const GameTimePoint now)
+{
+    apply_transition(game_session_.pause(now));
+}
+
+void Application::rebuild_run(const Seed requested_seed)
+{
+    CaveGenerationResult candidate_generation{generate_cave(requested_seed)};
+    ExitArchData candidate_arch{build_exit_arch(candidate_generation)};
+    auto candidate_controller{std::make_unique<GroundedController>(
+        build_collision_world(candidate_generation.scene),
+        find_start_spawn(candidate_generation))};
+    std::vector<CrystalInteractionTarget> candidate_targets{
+        build_crystal_interaction_targets(
+            candidate_generation.scene.elemental_visuals)};
+    VisibilityWorld candidate_visibility{
+        build_crystal_visibility_world(candidate_generation.scene)};
+    auto candidate_resources{std::make_unique<RenderResources>(
+        resource_root() / "shaders", candidate_generation.scene, candidate_arch,
+        candidate_generation.generation.effective_seed)};
+
+    generation_ = std::move(candidate_generation);
+    exit_arch_ = std::move(candidate_arch);
+    controller_ = std::move(candidate_controller);
+    interaction_targets_ = std::move(candidate_targets);
+    visibility_world_ = std::move(candidate_visibility);
+    render_resources_ = std::move(candidate_resources);
+    crystal_collection_ = {};
+    backlog_warning_emitted_ = false;
+
+    const GeometryVector3& position{generation_.scene.start_camera_position_metres};
+    const GeometryVector3& forward{generation_.scene.start_camera_forward};
+    camera_.set_pose(
+        {static_cast<float>(position.x), static_cast<float>(position.y),
+            static_cast<float>(position.z)},
+        {static_cast<float>(forward.x), static_cast<float>(forward.y),
+            static_cast<float>(forward.z)});
+    const GeometryVector3 camera_position{controller_->camera_position_metres()};
+    camera_.set_position({static_cast<float>(camera_position.x),
+        static_cast<float>(camera_position.y),
+        static_cast<float>(camera_position.z)});
+    clear_runtime_input();
+    ui_error_message_.clear();
+
+    std::cout << "Started cave for requested seed "
+              << generation_.generation.requested_seed.value
+              << " (effective " << generation_.generation.effective_seed.value
+              << ")\n";
+}
+
+void Application::restart_seed()
+{
+    if (game_session_.state() != GameState::paused
+        && game_session_.state() != GameState::completed) {
+        ui_error_message_ = "Restart Seed is unavailable in this game state.";
+        return;
+    }
+    try {
+        const Seed requested{generation_.generation.requested_seed};
+        rebuild_run(requested);
+        const GameTransition transition{game_session_.restart_seed()};
+        if (!transition.accepted) {
+            throw std::logic_error("Restart Seed is unavailable in this game state.");
+        }
+        apply_transition(transition);
+    } catch (const std::exception& error) {
+        ui_error_message_ = std::string{"Restart failed: "} + error.what();
+    }
+}
+
+void Application::new_cave()
+{
+    if (game_session_.state() != GameState::paused) {
+        ui_error_message_ = "New Cave is unavailable in this game state.";
+        return;
+    }
+    try {
+        const Seed requested{choose_new_requested_seed(
+            generation_.generation.requested_seed, seed_source_)};
+        rebuild_run(requested);
+        const GameTransition transition{game_session_.new_cave()};
+        if (!transition.accepted) {
+            throw std::logic_error("New Cave is unavailable in this game state.");
+        }
+        apply_transition(transition);
+    } catch (const std::exception& error) {
+        ui_error_message_ = std::string{"New Cave failed: "} + error.what();
+    }
+}
+
+void Application::play_again()
+{
+    if (game_session_.state() != GameState::completed) {
+        ui_error_message_ = "Play Again is unavailable in this game state.";
+        return;
+    }
+    try {
+        const Seed requested{choose_new_requested_seed(
+            generation_.generation.requested_seed, seed_source_)};
+        rebuild_run(requested);
+        const GameTransition transition{game_session_.play_again()};
+        if (!transition.accepted) {
+            throw std::logic_error("Play Again is unavailable in this game state.");
+        }
+        apply_transition(transition);
+    } catch (const std::exception& error) {
+        ui_error_message_ = std::string{"Play Again failed: "} + error.what();
+    }
+}
+
+void Application::clear_runtime_input()
+{
+    movement_input_blocked_ = true;
+    focused_crystal_.reset();
+    focused_exit_arch_ = false;
+    interaction_button_.reset(
+        window_ != nullptr && key_is_down(window_, GLFW_KEY_E));
+    mouse_sample_pending_ = true;
+}
+
+bool Application::gameplay_keys_released() const
+{
+    return !key_is_down(window_, GLFW_KEY_W)
+        && !key_is_down(window_, GLFW_KEY_A)
+        && !key_is_down(window_, GLFW_KEY_S)
+        && !key_is_down(window_, GLFW_KEY_D)
+        && !key_is_down(window_, GLFW_KEY_SPACE)
+        && !key_is_down(window_, GLFW_KEY_LEFT_SHIFT)
+        && !key_is_down(window_, GLFW_KEY_RIGHT_SHIFT)
+        && !key_is_down(window_, GLFW_KEY_E);
+}
+
+SessionBestKey Application::current_best_key() const noexcept
+{
+    return {generation_.generation.generator_version,
+        generation_.generation.effective_seed};
 }
 
 void Application::set_mouse_captured(const bool captured)
 {
     mouse_captured_ = captured;
     mouse_sample_pending_ = true;
-    glfwSetInputMode(
-        window_, GLFW_CURSOR, mouse_captured_ ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+    if (window_ != nullptr) {
+        glfwSetInputMode(window_, GLFW_CURSOR,
+            mouse_captured_ ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+    }
 }
 
 void Application::shutdown() noexcept
@@ -668,6 +1146,22 @@ void Application::cursor_position_callback(
     application->camera_.rotate(horizontal_delta, vertical_delta);
 }
 
+void Application::window_focus_callback(GLFWwindow* window, const int focused)
+{
+    Application* application = application_for(window);
+    if (application != nullptr && focused == GLFW_FALSE) {
+        application->pause_game(GameClock::now());
+    }
+}
+
+void Application::window_iconify_callback(GLFWwindow* window, const int iconified)
+{
+    Application* application = application_for(window);
+    if (application != nullptr && iconified == GLFW_TRUE) {
+        application->pause_game(GameClock::now());
+    }
+}
+
 void Application::key_callback(
     GLFWwindow* window,
     const int key,
@@ -680,7 +1174,7 @@ void Application::key_callback(
 
     Application* application = application_for(window);
     if (application != nullptr && key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
-        application->set_mouse_captured(!application->mouse_captured_);
+        application->pause_game(GameClock::now());
     }
 }
 

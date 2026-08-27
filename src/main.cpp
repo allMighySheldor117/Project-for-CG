@@ -25,11 +25,12 @@ int run_application(crystalbound::CaveGenerationResult generation)
 void print_usage()
 {
     std::cout
-        << "Crystalbound lit-cave development build\n"
+        << "Crystalbound - elemental cave exploration\n"
         << "Usage: crystalbound [--seed <uint64>]\n\n"
-        << "The current build generates and displays a deterministic low-poly cave\n"
-        << "with curved tunnels, a wooden bridge, Phong lighting, procedural materials,\n"
-        << "a warm camera lantern, and distance fog.\n"
+        << "Explore a deterministic low-poly cave, collect the five elemental\n"
+        << "crystals in any order, then return them to the exit arch.\n"
+        << "Use WASD to move, the mouse to look, Space to jump, Shift to sprint,\n"
+        << "E to interact, and Esc to pause.\n"
         << "Options:\n"
         << "  --seed <uint64>  Use a strict unsigned decimal requested seed.\n"
         << "  -h, --help       Show this help text without opening a window.\n";

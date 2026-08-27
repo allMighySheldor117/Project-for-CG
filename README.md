@@ -1,27 +1,24 @@
 # Crystalbound
 
-Crystalbound is a developing first-person C++17/OpenGL 3.3 cave-exploration
-game. Each run builds a deterministic low-poly cave from a seed. The player can
-explore its branching passages and collect five elemental crystals; activating
-the ancient exit arch is the next construction step.
+Crystalbound is a first-person C++17/OpenGL 3.3 cave-exploration game. Each run
+builds a deterministic low-poly cave from a seed. Explore its branching routes,
+collect the five glowing elemental crystals in any order, then return them to
+the ancient exit arch to stop the timer and escape.
 
-The repository is currently at construction Step 8B. It generates and
-mechanically validates complete chambers, curved tunnels, junctions, and at
-least one wooden bridge before publishing the cave for exploration. The cave
-gives each elemental chamber a distinct procedural identity and collectible
-glowing crystal on top of the shared Phong lighting, procedural materials, and
-distance fog. Collection requires range, camera focus, structural line of sight,
-and a rising-edge E press. Collected crystals and their lights disappear while
-their pedestals, landmarks, and cosmetic effects remain.
+The repository is currently at construction Step 9. A complete in-memory game
+loop now sits on top of the generated, mechanically validated cave: Start,
+Playing, Paused, and Completed states; a monotonic run timer; same-seed restart;
+new-cave generation; per-seed session best times; and a minimal Dear ImGui
+interface. No map or save file is used.
 
 ## Run a generated cave
 
 Build and launch a reproducible scene:
 
 ```powershell
-cmake -S . -B build/step-08b -G "Visual Studio 17 2022" -A x64 -DCRYSTALBOUND_BUILD_TESTS=ON
-cmake --build build/step-08b --config Debug --target crystalbound crystalbound_tests
-.\build\step-08b\Debug\crystalbound.exe --seed 42
+cmake -S . -B build/step-09 -G "Visual Studio 17 2022" -A x64 -DCRYSTALBOUND_BUILD_TESTS=ON
+cmake --build build/step-09 --config Debug --target crystalbound crystalbound_tests
+.\build\step-09\Debug\crystalbound.exe --seed 42
 ```
 
 Omit `--seed` to choose a requested seed from operating-system entropy. Entropy
@@ -46,7 +43,7 @@ Scene fingerprint: 9fb15c446b74730d
 Show command-line help without opening a window:
 
 ```powershell
-.\build\step-08b\Debug\crystalbound.exe --help
+.\build\step-09\Debug\crystalbound.exe --help
 ```
 
 ## Current scene
@@ -64,6 +61,8 @@ The generated cave provides:
 - one Fire, Water, Earth, Air, and Aether crystal, each with a different
   low-poly silhouette, color, glow rhythm, pedestal, and smaller future socket
   variant;
+- a low-poly stone exit arch with five elemental sockets and a violet portal
+  that activates only after all five crystals have been collected;
 - any-order crystal collection within 2.2 m and a 12-degree camera cone, with
   deterministic CPU structural line-of-sight testing and stable target
   tie-breaks by angle, distance, then object ID;
@@ -89,18 +88,20 @@ outward prop winding, traversal clearances, and spatial separation.
 | `Shift` | Sprint while held |
 | `Space` | Jump while grounded |
 | Mouse | Look around while captured |
-| `E` | Collect a focused, nearby, unobstructed crystal |
-| `Esc` | Release or recapture the mouse |
+| `E` | Collect a focused crystal, or activate the completed exit arch |
+| `Esc` | Pause and release the mouse |
 
-Close the application with the window close button. The player starts grounded
-in the Start chamber facing one of its portals. Looking up or down never changes
-the ground movement direction, and there is no public vertical free-flight
-mode.
+Begin Exploration starts the timer and captures the mouse. The player starts
+grounded in the Start chamber facing one of its portals. Looking up or down
+never changes the ground movement direction, and there is no public vertical
+free-flight mode. Losing focus or minimizing the window pauses without counting
+hidden time.
 
-A short prompt appears only when an uncollected crystal currently satisfies all
-interaction rules. `E` is rising-edge only, so holding it never repeats a
-collection. Collection is kept in memory and survives falling and safe-chamber
-respawning. It is not saved between launches.
+A short prompt appears only when an interaction satisfies the range, focus, and
+structural line-of-sight rules. `E` is rising-edge only, so holding it never
+repeats an action. The normal HUD shows only crystal progress and elapsed time;
+seed details appear on Start, Pause, and Completion screens. Collection,
+elapsed time, and best times are kept only for the current process.
 
 ## Rendering and geometry pipeline
 
@@ -197,25 +198,25 @@ packages are already installed.
 ## Build, test, and install
 
 ```powershell
-cmake -S . -B build/step-08b -G "Visual Studio 17 2022" -A x64 -DCRYSTALBOUND_BUILD_TESTS=ON
-cmake --build build/step-08b --config Debug --target crystalbound crystalbound_tests
-ctest --test-dir build/step-08b -C Debug --output-on-failure
-cmake --install build/step-08b --config Debug --prefix build/install-08b-debug
-cmake --build build/step-08b --config Release --target crystalbound crystalbound_tests
-ctest --test-dir build/step-08b -C Release --output-on-failure
-cmake --install build/step-08b --config Release --prefix build/install-08b
+cmake -S . -B build/step-09 -G "Visual Studio 17 2022" -A x64 -DCRYSTALBOUND_BUILD_TESTS=ON
+cmake --build build/step-09 --config Debug --target crystalbound crystalbound_tests
+ctest --test-dir build/step-09 -C Debug --output-on-failure
+cmake --install build/step-09 --config Debug --prefix build/install-09-debug
+cmake --build build/step-09 --config Release --target crystalbound crystalbound_tests
+ctest --test-dir build/step-09 -C Release --output-on-failure
+cmake --install build/step-09 --config Release --prefix build/install-09
 ```
 
 Run the dependency-free CPU harness directly to see every named case:
 
 ```powershell
-.\build\step-08b\Debug\crystalbound_tests.exe .\tests\testdata
+.\build\step-09\Debug\crystalbound_tests.exe .\tests\testdata
 ```
 
 Run the installed executable from any working directory:
 
 ```powershell
-.\build\install-08b\crystalbound.exe --seed 42
+.\build\install-09\crystalbound.exe --seed 42
 ```
 
 Build-tree and installed executables resolve shaders and other runtime resources
@@ -230,9 +231,9 @@ hashes, and licenses are recorded in `third_party/manifest.lock`,
 
 ## Automated checks
 
-`crystalbound_tests` runs 147 deterministic CPU cases without a window, OpenGL
-context, network, timing sleeps, or screenshot comparison. All 120 tests through
-Step 7 remain. The Step 7 cases lock texture dimensions/formats/sampling, fixed-point
+`crystalbound_tests` runs 163 deterministic CPU cases without a window, OpenGL
+context, network, timing sleeps, or screenshot comparison. All 147 tests through
+Step 8B remain. The Step 7 cases lock texture dimensions/formats/sampling, fixed-point
 rounding and fade behavior, periodic noise, octave weights, anisotropy, palette
 math, byte repeatability and goldens, material assignment, triplanar weights,
 light reservations/selection/ties, finite validation, fog boundaries,
@@ -245,6 +246,10 @@ orders and cover one-time state, socket readiness, exact range and focus
 boundaries, target tie-breaks, structural occlusion, invalid queries, E rising
 edges, renderer/light visibility, respawn preservation, and unchanged
 fingerprints, collision, reachability, and accepted/fallback determinism.
+The 16 Step 9 cases cover all state transitions and invalid transitions,
+monotonic pause-aware timing, session-best isolation, reset rules, injected
+new-seed selection, UI field visibility, all 120 collection orders, exact arch
+interaction boundaries, structural occlusion, and unchanged scene fingerprints.
 
 Seed `42` is the normal-acceptance example. Seed `123456789` is the checked
 fallback example: its eight normal candidates are rejected by existing geometry
@@ -259,13 +264,10 @@ downloads. GPU rendering remains a manual check.
 
 ## Current limitations
 
-Step 8B provides a lit, mechanically validated cave with elemental collection,
-not the complete game loop. The collection model exposes read-only future
-socket-display state, but socket rendering, the exit arch and activation, timer,
-start/pause/completion states, scoring, and the full HUD remain intentionally
-deferred to Step 9. Shadows, bloom, post-processing, sound, and maps remain out
-of scope.
+Crystalbound currently has one difficulty and no persistent save, map, sound,
+shadow mapping, bloom, or post-processing. The interface is intentionally
+minimal, and best times last only for the current application session.
 
-Step 8B intentionally has no shadow mapping. A local point light can therefore
+The current renderer intentionally has no shadow mapping. A local point light can therefore
 leak through a thin wall; the lantern's bounded range and attenuation limit the
 artifact but cannot eliminate it.

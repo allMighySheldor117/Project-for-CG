@@ -1,24 +1,25 @@
 # Crystalbound
 
-Crystalbound is a first-person C++17/OpenGL 3.3 cave-exploration game. Each run
-builds a deterministic low-poly cave from a seed. Explore its branching routes,
-collect the five glowing elemental crystals in any order, then return them to
-the ancient exit arch to stop the timer and escape.
+Crystalbound is a first-person C++17/OpenGL 3.3 cave-exploration game. Explore
+seven authored chambers connected by a deterministic linear cave route,
+collect the five glowing elemental crystals in any order, then activate the
+ancient exit arch to stop the timer and escape.
 
-The repository is currently at construction Step 9. A complete in-memory game
-loop now sits on top of the generated, mechanically validated cave: Start,
-Playing, Paused, and Completed states; a monotonic run timer; same-seed restart;
-new-cave generation; per-seed session best times; and a minimal Dear ImGui
-interface. No map or save file is used.
+The repository is currently at construction Step 10. The complete in-memory
+game loop now sits behind a deterministic complete-cave corpus, repeatability
+checks, Release profiling, and offline install verification. Start, Playing,
+Paused, and Completed states; a monotonic run timer; same-seed restart;
+new-cave generation; per-seed session best times; and the minimal Dear ImGui
+interface remain unchanged. No map or save file is used.
 
 ## Run a generated cave
 
 Build and launch a reproducible scene:
 
 ```powershell
-cmake -S . -B build/step-09 -G "Visual Studio 17 2022" -A x64 -DCRYSTALBOUND_BUILD_TESTS=ON
-cmake --build build/step-09 --config Debug --target crystalbound crystalbound_tests
-.\build\step-09\Debug\crystalbound.exe --seed 42
+cmake -S . -B build/step-10 -G "Visual Studio 17 2022" -A x64 -DCRYSTALBOUND_BUILD_TESTS=ON
+cmake --build build/step-10 --config Debug --target crystalbound crystalbound_tests crystalbound_seed_corpus
+.\build\step-10\Debug\crystalbound.exe --seed 42
 ```
 
 Omit `--seed` to choose a requested seed from operating-system entropy. Entropy
@@ -33,31 +34,31 @@ attempts. The startup diagnostic prints the requested, attempted, and effective
 seeds, every attempt outcome, fallback state, canonical topology and scene
 fingerprints, and the accepted mechanical report summary.
 
-Seed `42` accepts a normal candidate and keeps the existing Step 5B scene
+Seed `42` accepts the generator-version 3 authored scene with this canonical
 fingerprint:
 
 ```text
-Scene fingerprint: 9fb15c446b74730d
+Scene fingerprint: 1f8517f2c8d6c15a
 ```
 
 Show command-line help without opening a window:
 
 ```powershell
-.\build\step-09\Debug\crystalbound.exe --help
+.\build\step-10\Debug\crystalbound.exe --help
 ```
 
 ## Current scene
 
 The generated cave provides:
 
-- one Start, five elemental chambers, one Exit, and sometimes one Neutral
-  chamber;
-- a connected route graph with a guaranteed loop and optional alternate path;
+- one Start, five elemental chambers, and one Exit chamber;
+- a fixed one-way progression order with six level tunnel connections and no
+  bridges;
 - integer millimetre source contracts and deterministic per-object variation;
-- faceted chamber floors and inward-facing shells with explicit portal gaps;
-- curved Catmull-Rom tunnel sweeps with stable parallel-transport frames;
-- junction geometry joining every chamber portal to its route;
-- one deterministic bridge route with a walkable wooden deck and rails;
+- authored chamber meshes with fixed entrance sockets and deterministic
+  placement;
+- level tunnel meshes and junction geometry joining every chamber entrance
+  without traversal gaps;
 - one Fire, Water, Earth, Air, and Aether crystal, each with a different
   low-poly silhouette, color, glow rhythm, pedestal, and smaller future socket
   variant;
@@ -69,8 +70,8 @@ The generated cave provides:
 - Fire lava rocks, glowing cracks, and sparks; Water pools and cool mist;
   Earth pillars and stalagmites; Air wood spires, wind ribbons, and motes; and
   Aether arch stones, an orbiting rock, and violet haze;
-- separate chamber-floor, chamber-boundary, tunnel, bridge-deck, bridge-rail,
-  and fall-region collider records; and
+- separate chamber-floor, chamber-boundary, tunnel, authored-object, and
+  fall-region collider records; and
 - canonical scene fingerprints derived from integer contracts rather than raw
   floating-point mesh bytes.
 
@@ -198,25 +199,25 @@ packages are already installed.
 ## Build, test, and install
 
 ```powershell
-cmake -S . -B build/step-09 -G "Visual Studio 17 2022" -A x64 -DCRYSTALBOUND_BUILD_TESTS=ON
-cmake --build build/step-09 --config Debug --target crystalbound crystalbound_tests
-ctest --test-dir build/step-09 -C Debug --output-on-failure
-cmake --install build/step-09 --config Debug --prefix build/install-09-debug
-cmake --build build/step-09 --config Release --target crystalbound crystalbound_tests
-ctest --test-dir build/step-09 -C Release --output-on-failure
-cmake --install build/step-09 --config Release --prefix build/install-09
+cmake -S . -B build/step-10 -G "Visual Studio 17 2022" -A x64 -DCRYSTALBOUND_BUILD_TESTS=ON
+cmake --build build/step-10 --config Debug --target crystalbound crystalbound_tests crystalbound_seed_corpus
+ctest --test-dir build/step-10 -C Debug --output-on-failure
+cmake --install build/step-10 --config Debug --prefix build/install-step10-debug
+cmake --build build/step-10 --config Release --target crystalbound crystalbound_tests crystalbound_seed_corpus
+ctest --test-dir build/step-10 -C Release --output-on-failure
+cmake --install build/step-10 --config Release --prefix build/install-step10-release
 ```
 
 Run the dependency-free CPU harness directly to see every named case:
 
 ```powershell
-.\build\step-09\Debug\crystalbound_tests.exe .\tests\testdata
+.\build\step-10\Debug\crystalbound_tests.exe .\tests\testdata
 ```
 
 Run the installed executable from any working directory:
 
 ```powershell
-.\build\install-09\crystalbound.exe --seed 42
+.\build\install-step10-release\crystalbound.exe --seed 42
 ```
 
 Build-tree and installed executables resolve shaders and other runtime resources
@@ -231,7 +232,7 @@ hashes, and licenses are recorded in `third_party/manifest.lock`,
 
 ## Automated checks
 
-`crystalbound_tests` runs 163 deterministic CPU cases without a window, OpenGL
+`crystalbound_tests` runs 168 deterministic CPU cases without a window, OpenGL
 context, network, timing sleeps, or screenshot comparison. All 147 tests through
 Step 8B remain. The Step 7 cases lock texture dimensions/formats/sampling, fixed-point
 rounding and fade behavior, periodic noise, octave weights, anisotropy, palette
@@ -254,13 +255,48 @@ interaction boundaries, structural occlusion, and unchanged scene fingerprints.
 Seed `42` is the normal-acceptance example. Seed `123456789` is the checked
 fallback example: its eight normal candidates are rejected by existing geometry
 contracts before the fallback independently passes topology, geometry,
-collision, and mechanical validation. The CI corpus is intentionally bounded to
-`1`, `2`, `3`, `42`, and `123456789`; exhaustive procedural soak testing
-belongs to a later construction step.
+collision, and mechanical validation.
 
-GitHub Actions builds, tests, and installs on Windows/Visual Studio 2022 and
-Linux/Ninja. CI also rejects tracked `plans/` content and first-party CMake
-downloads. GPU rendering remains a manual check.
+The CPU-only `crystalbound_seed_corpus` executable validates each requested seed
+twice through topology, geometry, mesh, budget, collision, reachability,
+bridge, elemental, crystal-collection, exit-arch, finite-value, fingerprint,
+and repeatability contracts. Stable selection uses requested seeds `0` through
+`N-2`, followed by `123456789`; this includes seed `42` whenever `N >= 44`.
+CI runs exactly 256 requested seeds (`0..254` plus `123456789`). The larger
+10,000-seed Release audit is opt-in and is not part of CTest or GitHub Actions:
+
+```powershell
+.\build\step-10\Release\crystalbound_seed_corpus.exe --count 256
+.\build\step-10\Release\crystalbound_seed_corpus.exe --count 10000
+```
+
+The Step 10 local Release audit passed all 10,000 requested seeds and 20,000
+complete generated results in 126.927 seconds: 923 normal acceptances and 9,077
+independently validated fallbacks. The compact manual/regression set and its
+measured room, route, elevation, acceptance, and fingerprint metadata are in
+[tests/testdata/showcase-seeds.md](tests/testdata/showcase-seeds.md).
+
+GitHub Actions builds, tests, installs, and runs the exact 256-seed corpus on
+Windows/Visual Studio 2022 and Linux/Ninja. CI also rejects tracked `plans/`
+content and first-party CMake downloads. GPU rendering remains a manual check.
+
+## Verified performance
+
+Step 10 was measured in Release at 1280x720 with seed `42`, after a five-second
+warm-up, on an Intel Core i7-1165G7 (4 cores/8 threads) and Intel Iris Xe using
+OpenGL 3.3 driver `30.0.101.3111`. The original five-minute VSync-on baseline
+measured 15,315 frames at 20.678 ms median and 26.235 ms p95. Skipping point
+lights outside their exact zero-contribution range and avoiding redundant
+material-kind uniform updates reduced the five-minute uncapped measurement to
+8.966 ms median and 21.583 ms p95 across 24,323 frames. The median target of
+16.7 ms passed; the 20 ms p95 target missed by 1.583 ms on this machine.
+
+The profiler is opt-in, prints only to the console, closes automatically, and
+does not change the normal HUD or default VSync-on gameplay:
+
+```powershell
+.\build\step-10\Release\crystalbound.exe --seed 42 --profile-seconds 300 --profile-no-vsync
+```
 
 ## Current limitations
 
@@ -271,3 +307,9 @@ minimal, and best times last only for the current application session.
 The current renderer intentionally has no shadow mapping. A local point light can therefore
 leak through a thin wall; the lantern's bounded range and attenuation limit the
 artifact but cannot eliminate it.
+
+Normal-candidate geometry acceptance is also currently low: 9,077 of the
+10,000 audited requested seeds used the same validated fallback scene. Safety,
+atomic activation, and determinism remain intact, but procedural scene variety
+should be improved in a future generator-contract revision rather than by
+weakening Step 10 validation.

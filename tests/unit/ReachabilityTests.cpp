@@ -102,6 +102,16 @@ struct ReachabilityFixture {
     return *found;
 }
 
+void convert_first_route_to_synthetic_bridge(ReachabilityFixture& fixture)
+{
+    const Edge edge{fixture.generation.scene.routes.front().edge};
+    fixture.generation.scene.routes.front().bridge = true;
+    fixture.generation.scene.bridge_routes = {edge};
+    RouteCollisionRegion& route{collision_route(fixture, edge)};
+    route.kind = GroundContactKind::bridge;
+    route.rail_height_metres = 0.60;
+}
+
 [[nodiscard]] ReachabilityIssue forced_issue()
 {
     return {
@@ -230,37 +240,32 @@ void disconnected_required_chamber_is_rejected(const std::filesystem::path&)
 {
     ReachabilityFixture fixture;
     const NodeId start{start_node(fixture.generation.generation.topology).id};
-    std::vector<std::uint32_t> degree(
-        fixture.generation.generation.topology.nodes.size());
-    for (const Edge edge : fixture.generation.generation.topology.edges) {
-        ++degree[edge.first.value];
-        ++degree[edge.second.value];
-    }
-    const auto leaf{std::find_if(
+    const auto isolated{std::find_if(
         fixture.generation.generation.topology.nodes.begin(),
         fixture.generation.generation.topology.nodes.end(),
         [&](const ChamberNode& node) {
-            return node.id != start && degree[node.id.value] == 1U;
+            return node.id != start;
         })};
     require(
-        leaf != fixture.generation.generation.topology.nodes.end(),
-        "fixture has no non-Start leaf");
-    const auto edge{std::find_if(
-        fixture.generation.generation.topology.edges.begin(),
-        fixture.generation.generation.topology.edges.end(),
-        [&](const Edge candidate) {
-            return candidate.first == leaf->id || candidate.second == leaf->id;
-        })};
-    RouteCollisionRegion& route{collision_route(fixture, *edge)};
-    route.directed[0].route_to_chamber_supported = false;
-    route.directed[1].chamber_to_junction_supported = false;
+        isolated != fixture.generation.generation.topology.nodes.end(),
+        "fixture has no non-Start chamber");
+    for (const Edge edge : fixture.generation.generation.topology.edges) {
+        if (edge.first != isolated->id && edge.second != isolated->id) {
+            continue;
+        }
+        RouteCollisionRegion& route{collision_route(fixture, edge)};
+        for (auto& direction : route.directed) {
+            direction.chamber_to_junction_supported = false;
+            direction.route_to_chamber_supported = false;
+        }
+    }
     const MechanicalReachabilityReport report{validate(fixture)};
     require(!report.accepted, "disconnected required chamber was accepted");
     require(
         std::find(
             report.required_unreachable_chambers.begin(),
             report.required_unreachable_chambers.end(),
-            leaf->id)
+            isolated->id)
             != report.required_unreachable_chambers.end(),
         "disconnected chamber was not reported");
 }
@@ -329,36 +334,24 @@ void guaranteed_loop_is_bidirectional(const std::filesystem::path&)
     }
 }
 
-void guaranteed_loop_has_alternate_paths(const std::filesystem::path&)
+void fixed_layout_has_no_declared_loop(const std::filesystem::path&)
 {
     const ReachabilityFixture fixture;
-    const MechanicalReachabilityReport report{validate(fixture)};
-    const std::vector<NodeId>& cycle{
-        fixture.generation.generation.topology.guaranteed_cycle};
-    require(cycle.size() >= 3U, "guaranteed loop is too small");
-    const Edge omitted{make_edge(cycle[0], cycle[1])};
-    std::vector<NodeId> reached{cycle[0]};
-    bool changed{true};
-    while (changed) {
-        changed = false;
-        for (const DirectedRouteTraversal& route : report.directed_routes) {
-            if (!route.traversable || route.edge == omitted
-                || std::find(reached.begin(), reached.end(), route.from) == reached.end()
-                || std::find(reached.begin(), reached.end(), route.to) != reached.end()) {
-                continue;
-            }
-            reached.push_back(route.to);
-            changed = true;
-        }
-    }
-    require(
-        std::find(reached.begin(), reached.end(), cycle[1]) != reached.end(),
-        "guaranteed loop has no alternate mechanical path");
+    require(fixture.generation.generation.topology.guaranteed_cycle.empty(),
+        "fixed layout unexpectedly declares a loop");
+    require(std::none_of(
+                fixture.generation.generation.topology.routes.begin(),
+                fixture.generation.generation.topology.routes.end(),
+                [](const RouteDescriptor& route) {
+                    return route.on_guaranteed_cycle;
+                }),
+        "fixed layout marks a route as belonging to a guaranteed loop");
 }
 
 void bridge_is_bidirectional(const std::filesystem::path&)
 {
-    const ReachabilityFixture fixture;
+    ReachabilityFixture fixture;
+    convert_first_route_to_synthetic_bridge(fixture);
     const MechanicalReachabilityReport report{validate(fixture)};
     require(
         fixture.generation.scene.bridge_routes.size() == 1U,
@@ -378,6 +371,7 @@ void bridge_is_bidirectional(const std::filesystem::path&)
 void unsafe_bridge_is_rejected(const std::filesystem::path&)
 {
     ReachabilityFixture fixture;
+    convert_first_route_to_synthetic_bridge(fixture);
     RouteCollisionRegion& bridge{collision_route(
         fixture, fixture.generation.scene.bridge_routes.front())};
     bridge.rail_height_metres = 0.0;
@@ -510,6 +504,10 @@ void non_finite_sample_is_rejected(const std::filesystem::path&)
 void invalid_bounds_are_rejected(const std::filesystem::path&)
 {
     ReachabilityFixture fixture;
+    fixture.collision.fall_regions.push_back({
+        0xF411U,
+        {{90.0, -10.0, 90.0}, {91.0, -9.0, 91.0}},
+    });
     fixture.collision.fall_regions.front().bounds.minimum_metres.x =
         fixture.collision.fall_regions.front().bounds.maximum_metres.x + 1.0;
     require(
@@ -529,12 +527,12 @@ void unsafe_respawn_is_rejected(const std::filesystem::path&)
         [start](const ChamberCollisionRegion& candidate) {
             return candidate.chamber_id == start.id;
         })};
-    fixture.collision.fall_regions.front().bounds = {
+    fixture.collision.fall_regions.push_back({0xF412U, {
         {chamber->center_metres.x - 0.5, chamber->floor_height_metres - 0.5,
             chamber->center_metres.z - 0.5},
         {chamber->center_metres.x + 0.5, chamber->floor_height_metres + 0.5,
             chamber->center_metres.z + 0.5},
-    };
+    }});
     require(
         has_failure(validate(fixture), ReachabilityFailure::unsafe_respawn),
         "respawn inside a fall region was accepted");
@@ -678,20 +676,21 @@ void fixed_seed_corpus_is_bounded_and_repeatable(const std::filesystem::path&)
     }
 }
 
-void accepted_and_fallback_golden_seeds_hold(const std::filesystem::path&)
+void reference_golden_seeds_hold(const std::filesystem::path&)
 {
     const CaveGenerationResult accepted{generate_cave({42U})};
-    const CaveGenerationResult fallback{generate_cave({123'456'789U})};
+    const CaveGenerationResult reference{generate_cave({123'456'789U})};
     require(!accepted.generation.used_fallback, "seed 42 no longer accepts normally");
     require(
-        accepted.scene.fingerprint == 0x9fb15c446b74730dULL,
+        accepted.scene.fingerprint == 0x1F8517F2C8D6C15AULL,
         "seed 42 scene fingerprint changed");
     require(
-        fallback.generation.used_fallback
-            && fallback.generation.effective_seed == fallback_effective_seed
-            && fallback.generation.diagnostics.size()
-                == topology_limits.normal_attempt_count + 1U,
-        "fallback golden seed contract changed");
+        !reference.generation.used_fallback
+            && reference.generation.attempt_seed == Seed{123'456'789U}
+            && reference.generation.effective_seed == Seed{123'456'789U}
+            && reference.generation.diagnostics.size() == 1U
+            && reference.scene.fingerprint == 0x52F9039C6BAA9835ULL,
+        "reference seed contract changed");
 }
 
 }  // namespace
@@ -709,7 +708,7 @@ std::vector<TestCase> reachability_test_cases()
         {"multiple Starts are rejected", multiple_starts_are_rejected},
         {"every generated route is bidirectional", every_route_is_bidirectional},
         {"guaranteed loop is bidirectional", guaranteed_loop_is_bidirectional},
-        {"guaranteed loop has alternate paths", guaranteed_loop_has_alternate_paths},
+        {"fixed layout has no declared loop", fixed_layout_has_no_declared_loop},
         {"wooden bridge is bidirectional", bridge_is_bidirectional},
         {"unsafe bridge is rejected", unsafe_bridge_is_rejected},
         {"chamber-junction seam is required", chamber_junction_seam_is_required},
@@ -730,7 +729,7 @@ std::vector<TestCase> reachability_test_cases()
         {"known-good fallback is mechanically valid", known_good_fallback_is_mechanically_valid},
         {"same seed repeats complete acceptance", same_seed_repeats_complete_acceptance},
         {"fixed-seed corpus is bounded and repeatable", fixed_seed_corpus_is_bounded_and_repeatable},
-        {"accepted and fallback golden seeds hold", accepted_and_fallback_golden_seeds_hold},
+        {"reference golden seeds hold", reference_golden_seeds_hold},
     };
 }
 

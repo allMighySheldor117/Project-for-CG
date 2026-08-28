@@ -320,6 +320,31 @@ TextureImage generate_wood_texture(const Seed seed, const std::uint64_t stable_o
     return image;
 }
 
+TextureImage generate_material_mask(
+    const Seed seed,
+    const MaterialKind profile,
+    const std::uint64_t stable_object_id)
+{
+    const std::uint64_t profile_key{stable_object_id
+        ^ (static_cast<std::uint64_t>(profile) << 56U)
+        ^ 0x4D41534B00000000ULL};
+    TextureImage image{generate_rock_texture(seed, profile_key)};
+    if (profile == MaterialKind::wood || profile == MaterialKind::wood_bark) {
+        const TextureImage wood{generate_wood_texture(seed, profile_key)};
+        image.bytes.clear();
+        image.bytes.reserve(static_cast<std::size_t>(wood.width) * wood.height);
+        for (std::size_t index{}; index < wood.bytes.size(); index += 3U) {
+            const std::uint32_t luminance{
+                static_cast<std::uint32_t>(wood.bytes[index]) * 3U
+                + static_cast<std::uint32_t>(wood.bytes[index + 1U]) * 6U
+                + static_cast<std::uint32_t>(wood.bytes[index + 2U])};
+            image.bytes.push_back(static_cast<std::uint8_t>((luminance + 5U) / 10U));
+        }
+    }
+    validate_texture_image(image);
+    return image;
+}
+
 MaterialParameters material_parameters(const MaterialKind material)
 {
     switch (material) {
@@ -332,8 +357,162 @@ MaterialParameters material_parameters(const MaterialKind material)
     case MaterialKind::untextured:
         return {{0.030F, 0.030F, 0.035F}, {1.0F, 1.0F, 1.0F},
             {0.35F, 0.35F, 0.40F}, {0.0F, 0.0F, 0.0F}, 42.0F, 1.0F, 1.0F};
+    case MaterialKind::basalt_lava_crust:
+        return {{0.025F, 0.018F, 0.014F}, {0.82F, 0.58F, 0.42F},
+            {0.22F, 0.12F, 0.08F}, {0.08F, 0.012F, 0.002F},
+            18.0F, 0.38F, 5.0F};
+    case MaterialKind::lava:
+        return {{0.08F, 0.012F, 0.001F}, {0.92F, 0.32F, 0.04F},
+            {0.10F, 0.04F, 0.01F}, {1.15F, 0.18F, 0.015F},
+            10.0F, 0.24F, 3.0F};
+    case MaterialKind::wet_rock:
+        return {{0.018F, 0.028F, 0.040F}, {0.62F, 0.78F, 0.92F},
+            {0.62F, 0.72F, 0.82F}, {0.0F, 0.0F, 0.0F},
+            72.0F, 0.30F, 5.0F};
+    case MaterialKind::shallow_water:
+        return {{0.012F, 0.040F, 0.055F}, {0.25F, 0.72F, 0.86F},
+            {0.85F, 0.92F, 1.0F}, {0.005F, 0.055F, 0.075F},
+            96.0F, 0.19F, 2.0F};
+    case MaterialKind::deep_water:
+        return {{0.005F, 0.016F, 0.035F}, {0.08F, 0.32F, 0.62F},
+            {0.72F, 0.84F, 1.0F}, {0.0F, 0.018F, 0.05F},
+            112.0F, 0.16F, 2.0F};
+    case MaterialKind::soil_mineral:
+        return {{0.035F, 0.028F, 0.016F}, {0.78F, 0.66F, 0.44F},
+            {0.18F, 0.20F, 0.16F}, {0.0F, 0.0F, 0.0F},
+            24.0F, 0.42F, 5.0F};
+    case MaterialKind::wood_bark:
+        return {{0.032F, 0.024F, 0.012F}, {0.72F, 0.78F, 0.56F},
+            {0.16F, 0.14F, 0.08F}, {0.0F, 0.0F, 0.0F},
+            20.0F, 4.5F, 1.0F};
+    case MaterialKind::aether_crystal:
+        return {{0.038F, 0.010F, 0.055F}, {0.70F, 0.36F, 0.92F},
+            {0.82F, 0.68F, 1.0F}, {0.22F, 0.045F, 0.34F},
+            84.0F, 0.27F, 4.0F};
+    case MaterialKind::mist:
+        return {{0.012F, 0.016F, 0.022F}, {0.42F, 0.48F, 0.58F},
+            {0.0F, 0.0F, 0.0F}, {0.025F, 0.035F, 0.055F},
+            8.0F, 0.20F, 1.0F};
+    case MaterialKind::water_marble:
+        return {{0.030F, 0.040F, 0.052F}, {0.80F, 0.90F, 0.98F},
+            {0.72F, 0.82F, 0.92F}, {0.0F, 0.0F, 0.0F},
+            86.0F, 0.42F, 5.0F};
     }
     throw std::invalid_argument("Material kind is not supported.");
+}
+
+MaterialProfile material_profile(const MaterialKind material)
+{
+    switch (material) {
+    case MaterialKind::rock:
+        return {material, MaterialProjection::triplanar,
+            MaterialEffect::none, opaque_render_pass, procedural_texture_width
+                * procedural_texture_height, false};
+    case MaterialKind::wood:
+        return {material, MaterialProjection::regular_uv,
+            MaterialEffect::none, opaque_render_pass, procedural_texture_width
+                * procedural_texture_height * 3U, false};
+    case MaterialKind::untextured:
+        return {material, MaterialProjection::none,
+            MaterialEffect::none, opaque_render_pass, 0U, false};
+    case MaterialKind::basalt_lava_crust:
+        return {material, MaterialProjection::triplanar,
+            MaterialEffect::lava_flow, opaque_render_pass,
+            procedural_texture_width * procedural_texture_height, true};
+    case MaterialKind::lava:
+        return {material, MaterialProjection::triplanar,
+            MaterialEffect::lava_flow, emissive_render_pass,
+            procedural_texture_width * procedural_texture_height, true};
+    case MaterialKind::wet_rock:
+        return {material, MaterialProjection::triplanar,
+            MaterialEffect::none, opaque_render_pass,
+            procedural_texture_width * procedural_texture_height, false};
+    case MaterialKind::shallow_water:
+    case MaterialKind::deep_water:
+        return {material, MaterialProjection::regular_uv,
+            MaterialEffect::water_ripple, transparent_effect_render_pass,
+            procedural_texture_width * procedural_texture_height, true};
+    case MaterialKind::soil_mineral:
+        return {material, MaterialProjection::triplanar,
+            MaterialEffect::none, opaque_render_pass,
+            procedural_texture_width * procedural_texture_height, false};
+    case MaterialKind::wood_bark:
+        return {material, MaterialProjection::regular_uv,
+            MaterialEffect::wind, opaque_render_pass,
+            procedural_texture_width * procedural_texture_height, true};
+    case MaterialKind::aether_crystal:
+        return {material, MaterialProjection::triplanar,
+            MaterialEffect::aether_pulse, emissive_render_pass,
+            procedural_texture_width * procedural_texture_height, true};
+    case MaterialKind::mist:
+        return {material, MaterialProjection::none,
+            MaterialEffect::drifting_mist, transparent_effect_render_pass,
+            0U, true};
+    case MaterialKind::water_marble:
+        return {material, MaterialProjection::triplanar,
+            MaterialEffect::none, opaque_render_pass,
+            procedural_texture_width * procedural_texture_height, false};
+    }
+    throw std::invalid_argument("Material profile is not supported.");
+}
+
+MaterialKind material_for_template_surface(const TemplateSurfaceKind surface)
+{
+    switch (surface) {
+    case TemplateSurfaceKind::stone:
+        return MaterialKind::rock;
+    case TemplateSurfaceKind::basalt:
+        return MaterialKind::basalt_lava_crust;
+    case TemplateSurfaceKind::shallow_water:
+        return MaterialKind::shallow_water;
+    case TemplateSurfaceKind::earth:
+        return MaterialKind::soil_mineral;
+    case TemplateSurfaceKind::wood:
+        return MaterialKind::wood_bark;
+    case TemplateSurfaceKind::aether_stone:
+        return MaterialKind::aether_crystal;
+    }
+    throw std::invalid_argument("Template surface has no material profile.");
+}
+
+std::vector<MaterialKind> required_cave_material_profiles()
+{
+    return {MaterialKind::rock, MaterialKind::basalt_lava_crust,
+        MaterialKind::lava, MaterialKind::wet_rock,
+        MaterialKind::shallow_water, MaterialKind::deep_water,
+        MaterialKind::soil_mineral, MaterialKind::wood,
+        MaterialKind::wood_bark, MaterialKind::aether_crystal,
+        MaterialKind::mist, MaterialKind::water_marble};
+}
+
+MaterialBudgetUsage accumulate_material_budget(
+    const std::vector<MaterialKind>& profiles,
+    const MaterialBudgetLimits limits)
+{
+    std::vector<MaterialKind> unique{profiles};
+    std::sort(unique.begin(), unique.end(), [](const MaterialKind left,
+                                               const MaterialKind right) {
+        return static_cast<std::uint8_t>(left) < static_cast<std::uint8_t>(right);
+    });
+    unique.erase(std::unique(unique.begin(), unique.end()), unique.end());
+    MaterialBudgetUsage usage{
+        static_cast<std::uint32_t>(unique.size()), 0U};
+    for (const MaterialKind profile : unique) {
+        usage.mask_bytes += material_profile(profile).mask_bytes;
+    }
+    if (usage.profile_count > limits.maximum_profiles
+        || usage.mask_bytes > limits.maximum_mask_bytes) {
+        throw std::invalid_argument("Procedural material budget exceeded.");
+    }
+    return usage;
+}
+
+void validate_visual_effect_time(const float elapsed_seconds)
+{
+    if (!std::isfinite(elapsed_seconds) || elapsed_seconds < 0.0F) {
+        throw std::invalid_argument(
+            "Visual effect time must be finite and non-negative.");
+    }
 }
 
 void validate_material_parameters(const MaterialParameters& material)

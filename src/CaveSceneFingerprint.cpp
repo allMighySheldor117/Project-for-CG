@@ -12,7 +12,7 @@ namespace {
 
 constexpr std::uint64_t fnv_offset_basis{14695981039346656037ULL};
 constexpr std::uint64_t fnv_prime{1099511628211ULL};
-constexpr std::uint32_t cave_scene_contract_version{1U};
+constexpr std::uint32_t cave_scene_contract_version{2U};
 
 template <typename Integer>
 void append_little_endian(std::vector<std::uint8_t>& bytes, const Integer value)
@@ -60,6 +60,21 @@ std::uint64_t cave_scene_fingerprint(
     append_little_endian(bytes, current_generator_version.value);
     append_little_endian(bytes, random_domain::geometry);
     append_little_endian(bytes, effective_seed.value);
+    append_little_endian(bytes, scene.template_gameplay_fingerprint);
+    append_little_endian(bytes,
+        static_cast<std::uint32_t>(scene.template_socket_assignments.size()));
+    for (const ChamberSocketAssignment& assignment :
+        scene.template_socket_assignments) {
+        append_little_endian(bytes, assignment.chamber_id.value);
+        append_little_endian(bytes, assignment.orientation_octant);
+        append_little_endian(bytes,
+            static_cast<std::uint32_t>(assignment.incident_edges.size()));
+        for (const AssignedTemplateSocket& edge_socket :
+            assignment.incident_edges) {
+            append_edge(bytes, edge_socket.edge);
+            append_little_endian(bytes, edge_socket.socket_index);
+        }
+    }
 
     append_little_endian(bytes, static_cast<std::uint32_t>(scene.chambers.size()));
     for (const ChamberGeometryContract& chamber : scene.chambers) {
@@ -74,6 +89,21 @@ std::uint64_t cave_scene_fingerprint(
         for (const std::int32_t offset : chamber.radial_offsets_millimetres) {
             append_little_endian(bytes, offset);
         }
+        append_little_endian(bytes, chamber.minimum_safe_ring_radius_millimetres);
+        append_little_endian(bytes, static_cast<std::uint8_t>(chamber.identity.floor));
+        append_little_endian(bytes, static_cast<std::uint8_t>(chamber.identity.shell));
+        append_little_endian(bytes, static_cast<std::uint8_t>(chamber.identity.entrance));
+        append_little_endian(bytes, static_cast<std::uint8_t>(chamber.identity.landmark));
+        append_little_endian(bytes, chamber.identity.vertical_profile);
+        append_little_endian(bytes, static_cast<std::uint32_t>(chamber.rings.size()));
+        for (const ChamberRingContract& ring : chamber.rings) {
+            append_little_endian(bytes, ring.height_millimetres);
+            append_little_endian(bytes,
+                static_cast<std::uint32_t>(ring.radii_millimetres.size()));
+            for (const std::int32_t radius : ring.radii_millimetres) {
+                append_little_endian(bytes, radius);
+            }
+        }
     }
 
     append_little_endian(bytes, static_cast<std::uint32_t>(scene.portals.size()));
@@ -83,6 +113,7 @@ std::uint64_t cave_scene_fingerprint(
         append_point(bytes, portal.center_millimetres);
         append_point(bytes, portal.inward_direction_millimetres);
         append_little_endian(bytes, portal.opening_side_index);
+        append_little_endian(bytes, portal.approach_depth_millimetres);
     }
 
     append_little_endian(bytes, static_cast<std::uint32_t>(scene.routes.size()));
@@ -105,6 +136,11 @@ std::uint64_t cave_scene_fingerprint(
             append_little_endian(bytes, offset);
         }
         append_little_endian(bytes, static_cast<std::uint8_t>(route.bridge ? 1U : 0U));
+        append_little_endian(bytes, route.tunnel_clear_width_millimetres);
+        append_little_endian(bytes, route.tunnel_side_height_millimetres);
+        append_little_endian(bytes, route.tunnel_crown_height_millimetres);
+        append_little_endian(bytes, route.vestibule_length_millimetres);
+        append_little_endian(bytes, route.join_overlap_millimetres);
         append_little_endian(bytes, route.bridge_width_millimetres);
         append_little_endian(bytes, route.bridge_rail_height_millimetres);
     }

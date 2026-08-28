@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -10,8 +11,10 @@
 #include "crystalbound/CommandLine.hpp"
 #include "crystalbound/CrystalCollection.hpp"
 #include "crystalbound/ExitArch.hpp"
+#include "crystalbound/FrameProfile.hpp"
 #include "crystalbound/GameLoop.hpp"
 #include "crystalbound/PlayerController.hpp"
+#include "crystalbound/ProfileTraversal.hpp"
 
 struct GLFWwindow;
 
@@ -21,7 +24,10 @@ class Application {
 public:
     explicit Application(
         CaveGenerationResult generation,
-        SeedSource seed_source = os_entropy_seed);
+        SeedSource seed_source = os_entropy_seed,
+        std::optional<std::uint32_t> profile_seconds = std::nullopt,
+        bool profile_vsync = true,
+        bool automated_profile_traversal = false);
     ~Application();
 
     Application(const Application&) = delete;
@@ -96,6 +102,11 @@ private:
     bool movement_input_blocked_{true};
     std::string ui_error_message_{};
     std::unique_ptr<RenderResources> render_resources_{};
+    std::optional<FrameProfiler> frame_profiler_{};
+    std::optional<std::uint32_t> profile_seconds_{};
+    bool profile_vsync_{true};
+    std::optional<ProfileTraversalWorkload> profile_traversal_{};
+    std::size_t profile_waypoint_index_{};
 };
 
 }  // namespace crystalbound

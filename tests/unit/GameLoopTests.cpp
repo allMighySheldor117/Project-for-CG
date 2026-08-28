@@ -430,7 +430,7 @@ void step_nine_preserves_structural_contracts(const std::filesystem::path&)
     const CaveGenerationResult first{generate_cave({42U})};
     static_cast<void>(build_exit_arch(first));
     const CaveGenerationResult repeat{generate_cave({42U})};
-    require(first.scene.fingerprint == 0x9fb15c446b74730dULL
+    require(first.scene.fingerprint == 0x1F8517F2C8D6C15AULL
             && first.scene.fingerprint == repeat.scene.fingerprint,
         "exit arch changed the structural cave fingerprint");
     require(first.generation.fingerprint == repeat.generation.fingerprint

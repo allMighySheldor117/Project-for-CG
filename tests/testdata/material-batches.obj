@@ -1,0 +1,18 @@
+mtllib material-batches.mtl
+v 10.0 0.0 20.0
+v 12.0 0.0 20.0
+v 10.0 2.0 20.0
+v 14.0 0.0 20.0
+v 14.0 2.0 20.0
+vt 0.0 0.0
+vt 1.0 0.0
+vt 0.0 1.0
+vt 1.0 1.0
+vn 0.0 0.0 1.0
+vn 0.0 0.0 0.0
+o RedTriangle
+usemtl Red
+f 1/1/1 2/2/1 3/3/1
+o BlueTriangle
+usemtl Blue
+f 2/1/2 4/2/2 5/4/2

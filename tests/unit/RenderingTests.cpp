@@ -231,17 +231,120 @@ void material_parameters_are_distinct_and_valid(const std::filesystem::path&)
         "rock and wood material policies are not distinct");
 }
 
-void cave_and_bridge_material_assignment_is_stable(const std::filesystem::path&)
+void material_profiles_cover_every_template_surface(const std::filesystem::path&)
+{
+    const std::array<TemplateSurfaceKind, 6> surfaces{
+        TemplateSurfaceKind::stone,
+        TemplateSurfaceKind::basalt,
+        TemplateSurfaceKind::shallow_water,
+        TemplateSurfaceKind::earth,
+        TemplateSurfaceKind::wood,
+        TemplateSurfaceKind::aether_stone,
+    };
+    std::vector<MaterialKind> mapped;
+    for (const TemplateSurfaceKind surface : surfaces) {
+        const MaterialKind kind{material_for_template_surface(surface)};
+        validate_material_parameters(material_parameters(kind));
+        validate_render_pass_state(material_profile(kind).pass);
+        mapped.push_back(kind);
+    }
+    std::sort(mapped.begin(), mapped.end(), [](const MaterialKind left,
+                                               const MaterialKind right) {
+        return static_cast<std::uint8_t>(left)
+            < static_cast<std::uint8_t>(right);
+    });
+    require(std::adjacent_find(mapped.begin(), mapped.end()) == mapped.end(),
+        "template surfaces share an unintended material profile");
+    require(required_cave_material_profiles().size() == 12U,
+        "required material-profile inventory is incomplete");
+}
+
+void material_masks_repeat_and_respond_to_seed_and_profile(
+    const std::filesystem::path&)
+{
+    const TextureImage first{generate_material_mask(
+        {42U}, MaterialKind::basalt_lava_crust, 0x1234U)};
+    const TextureImage repeat{generate_material_mask(
+        {42U}, MaterialKind::basalt_lava_crust, 0x1234U)};
+    const TextureImage changed_seed{generate_material_mask(
+        {43U}, MaterialKind::basalt_lava_crust, 0x1234U)};
+    const TextureImage changed_profile{generate_material_mask(
+        {42U}, MaterialKind::wet_rock, 0x1234U)};
+    require(first.bytes == repeat.bytes,
+        "material mask does not repeat for the same inputs");
+    require(first.bytes != changed_seed.bytes
+            && first.bytes != changed_profile.bytes,
+        "material mask ignores its seed or profile");
+}
+
+void transparent_profiles_preserve_pass_state(const std::filesystem::path&)
+{
+    for (const MaterialKind kind : {
+             MaterialKind::shallow_water,
+             MaterialKind::deep_water,
+             MaterialKind::mist}) {
+        const MaterialProfile profile{material_profile(kind)};
+        require(profile.pass.framebuffer_srgb && profile.pass.depth_test
+                && !profile.pass.depth_write
+                && profile.pass.cull_mode == CullMode::none
+                && profile.pass.blend_mode == BlendMode::premultiplied_alpha,
+            "transparent profile changed its depth/blend contract");
+        require(profile.visual_time_only,
+            "transparent effect is not marked visual-only");
+    }
+    require_throws<std::invalid_argument>([] {
+        validate_visual_effect_time(std::numeric_limits<float>::infinity());
+    }, "non-finite visual effect time was accepted");
+}
+
+void material_budget_accumulator_rejects_overflow(const std::filesystem::path&)
+{
+    const std::vector<MaterialKind> profiles{
+        required_cave_material_profiles()};
+    const MaterialBudgetUsage usage{accumulate_material_budget(profiles)};
+    require(usage.profile_count == profiles.size()
+            && usage.mask_bytes > 0U,
+        "material budget did not aggregate required profiles");
+    require_throws<std::invalid_argument>([&] {
+        static_cast<void>(accumulate_material_budget(
+            profiles, {usage.profile_count - 1U, usage.mask_bytes}));
+    }, "material profile-count overflow was accepted");
+    require_throws<std::invalid_argument>([&] {
+        static_cast<void>(accumulate_material_budget(
+            profiles, {usage.profile_count, usage.mask_bytes - 1U}));
+    }, "material mask-byte overflow was accepted");
+}
+
+void cave_and_tunnel_material_assignment_is_stable(const std::filesystem::path&)
 {
     const CaveGenerationResult result{generate_cave({42U})};
-    bool found_bridge{};
+    bool found_route{};
+    std::vector<MaterialKind> chamber_materials;
     for (const SceneMeshPiece& piece : result.scene.mesh_pieces) {
-        const MaterialKind expected{piece.kind == ScenePieceKind::bridge
-                ? MaterialKind::wood : MaterialKind::rock};
-        require(piece.material == expected, "scene piece received the wrong material");
-        found_bridge = found_bridge || piece.kind == ScenePieceKind::bridge;
+        require(piece.kind != ScenePieceKind::bridge,
+            "fixed authored layout unexpectedly emitted a bridge material batch");
+        if (piece.kind == ScenePieceKind::tunnel
+            || piece.kind == ScenePieceKind::junction) {
+            require(piece.material == MaterialKind::rock,
+                "neutral route lost its rock material");
+            found_route = true;
+        } else {
+            chamber_materials.push_back(piece.material);
+        }
     }
-    require(found_bridge, "material corpus did not include a bridge");
+    require(found_route, "material corpus did not include a tunnel or junction");
+    for (const MaterialKind expected : {
+             MaterialKind::basalt_lava_crust,
+             MaterialKind::lava,
+             MaterialKind::wet_rock,
+             MaterialKind::water_marble,
+             MaterialKind::soil_mineral,
+             MaterialKind::wood_bark,
+             MaterialKind::aether_crystal}) {
+        require(std::find(chamber_materials.begin(), chamber_materials.end(),
+                    expected) != chamber_materials.end(),
+            "elemental chamber structural material is missing");
+    }
 }
 
 void triplanar_weights_are_finite_and_normalized(const std::filesystem::path&)
@@ -352,19 +455,20 @@ void invalid_render_pass_is_rejected(const std::filesystem::path&)
     }, "depth write without depth test was accepted");
 }
 
-void step6b_seed_contracts_remain_unchanged(const std::filesystem::path&)
+void fixed_layout_seed_contracts_remain_unchanged(const std::filesystem::path&)
 {
     const CaveGenerationResult accepted{generate_cave({42U})};
-    const CaveGenerationResult fallback{generate_cave({123'456'789U})};
+    const CaveGenerationResult reference{generate_cave({123'456'789U})};
     require(!accepted.generation.used_fallback
-            && accepted.scene.fingerprint == 0x9fb15c446b74730dULL
+            && accepted.scene.fingerprint == 0x1F8517F2C8D6C15AULL
             && accepted.reachability.accepted,
-        "seed 42 Step 6B acceptance changed");
-    require(fallback.generation.used_fallback
-            && fallback.generation.effective_seed == fallback_effective_seed
-            && fallback.generation.diagnostics.size() == topology_limits.normal_attempt_count + 1U
-            && fallback.reachability.accepted,
-        "fallback Step 6B acceptance changed");
+        "seed 42 fixed-layout acceptance changed");
+    require(!reference.generation.used_fallback
+            && reference.generation.effective_seed == Seed{123'456'789U}
+            && reference.generation.diagnostics.size() == 1U
+            && reference.scene.fingerprint == 0x52F9039C6BAA9835ULL
+            && reference.reachability.accepted,
+        "reference fixed-layout acceptance changed");
 }
 
 }  // namespace
@@ -386,7 +490,15 @@ std::vector<TestCase> rendering_test_cases()
         {"wood texture is repeatable and bounded", wood_texture_is_repeatable_and_bounded},
         {"wood texture matches golden bytes", wood_texture_matches_golden_bytes},
         {"material parameters are distinct and valid", material_parameters_are_distinct_and_valid},
-        {"cave and bridge material assignment is stable", cave_and_bridge_material_assignment_is_stable},
+        {"material profiles cover every template surface",
+            material_profiles_cover_every_template_surface},
+        {"material masks repeat and respond to seed/profile",
+            material_masks_repeat_and_respond_to_seed_and_profile},
+        {"transparent profiles preserve pass state",
+            transparent_profiles_preserve_pass_state},
+        {"material budget accumulator rejects overflow",
+            material_budget_accumulator_rejects_overflow},
+        {"cave and tunnel material assignment is stable", cave_and_tunnel_material_assignment_is_stable},
         {"triplanar weights are finite and normalized", triplanar_weights_are_finite_and_normalized},
         {"light budget and lantern are locked", light_budget_and_lantern_are_locked},
         {"light selection reserves roles and caps at eight", light_selection_reserves_roles_and_caps_at_eight},
@@ -396,7 +508,7 @@ std::vector<TestCase> rendering_test_cases()
         {"invalid fog is rejected", invalid_fog_is_rejected},
         {"render pass and gamma policy is explicit", render_pass_and_gamma_policy_is_explicit},
         {"invalid render pass is rejected", invalid_render_pass_is_rejected},
-        {"Step 6B seed contracts remain unchanged", step6b_seed_contracts_remain_unchanged},
+        {"fixed-layout seed contracts remain unchanged", fixed_layout_seed_contracts_remain_unchanged},
     };
 }
 

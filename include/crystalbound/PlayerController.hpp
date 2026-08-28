@@ -40,6 +40,37 @@ struct ChamberCollisionRegion {
     double usable_radius_metres{};
 };
 
+struct ChamberSupportRegion {
+    NodeId chamber_id{};
+    std::uint64_t stable_object_id{};
+    std::vector<TemplatePoint2> world_polygon_millimetres{};
+    double floor_height_metres{};
+    double ceiling_height_metres{};
+    std::uint32_t support_priority{};
+};
+
+struct ChamberBlockerRegion {
+    std::uint64_t stable_object_id{};
+    std::vector<TemplatePoint2> world_polygon_millimetres{};
+    double minimum_height_metres{};
+    double maximum_height_metres{};
+    bool allows_reachable_support{};
+};
+
+struct ChamberHazardRegion {
+    std::uint64_t stable_object_id{};
+    std::vector<TemplatePoint2> world_polygon_millimetres{};
+    double minimum_height_metres{};
+    double maximum_height_metres{};
+    std::uint32_t priority{};
+};
+
+struct ChamberRespawnPoint {
+    NodeId chamber_id{};
+    std::uint64_t stable_object_id{};
+    GeometryVector3 feet_position_metres{};
+};
+
 struct RouteCollisionRegion {
     Edge edge{};
     std::uint64_t stable_object_id{};
@@ -71,6 +102,10 @@ struct FallCollisionRegion {
 
 struct CollisionWorld {
     std::vector<ChamberCollisionRegion> chambers{};
+    std::vector<ChamberSupportRegion> chamber_supports{};
+    std::vector<ChamberBlockerRegion> chamber_blockers{};
+    std::vector<ChamberHazardRegion> chamber_hazards{};
+    std::vector<ChamberRespawnPoint> chamber_respawns{};
     std::vector<RouteCollisionRegion> routes{};
     std::vector<FallCollisionRegion> fall_regions{};
     double kill_plane_metres{};
@@ -126,6 +161,10 @@ public:
 [[nodiscard]] bool intersects_fall_region(
     const CollisionWorld& world,
     const GeometryVector3& feet_position_metres) noexcept;
+[[nodiscard]] GeometryVector3 chamber_respawn_position(
+    const CollisionWorld& world,
+    const ChamberCollisionRegion& chamber,
+    const GeometryVector3& reference_position_metres) noexcept;
 
 class GroundedController final {
 public:

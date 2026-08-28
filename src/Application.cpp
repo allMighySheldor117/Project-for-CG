@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
@@ -27,8 +28,10 @@
 #include <imgui_impl_opengl3.h>
 
 #include "crystalbound/CrystalCollection.hpp"
+#include "crystalbound/AuthoredChamber.hpp"
 #include "crystalbound/GpuMesh.hpp"
 #include "crystalbound/GpuTexture.hpp"
+#include "crystalbound/ObjLoader.hpp"
 #include "crystalbound/Rendering.hpp"
 #include "crystalbound/ResourcePaths.hpp"
 #include "crystalbound/ShaderProgram.hpp"
@@ -41,6 +44,337 @@ constexpr int initial_window_height{720};
 constexpr float background_red{0.08F};
 constexpr float background_green{0.09F};
 constexpr float background_blue{0.12F};
+constexpr double profile_warmup_seconds{5.0};
+constexpr std::size_t expected_maximum_profile_hertz{240U};
+constexpr float millimetres_to_metres{0.001F};
+
+struct ImportedMaterialStyle {
+    MaterialKind kind{MaterialKind::untextured};
+    std::array<float, 3> albedo{};
+    std::array<float, 3> emission{};
+};
+
+[[nodiscard]] ImportedMaterialStyle fire_chamber_material_style(
+    const MaterialMeshBatch& batch)
+{
+    if (batch.material_name == "M_Lava"
+        || batch.material_name == "M_DeepAnimatedLava") {
+        return {MaterialKind::lava, {1.0F, 0.11F, 0.008F}, {0.62F, 0.055F, 0.002F}};
+    }
+    if (batch.material_name == "M_Fire"
+        || batch.material_name == "M_HotLavaCore"
+        || batch.material_name == "M_Embers") {
+        return {MaterialKind::lava, {1.0F, 0.28F, 0.012F}, {0.95F, 0.16F, 0.006F}};
+    }
+    if (batch.material_name == "M_Bubble") {
+        return {MaterialKind::lava, {1.0F, 0.17F, 0.008F}, {0.68F, 0.075F, 0.002F}};
+    }
+    if (batch.material_name == "M_HotIron"
+        || batch.material_name == "M_MagmaFissures") {
+        return {MaterialKind::basalt_lava_crust, batch.diffuse, {0.45F, 0.11F, 0.015F}};
+    }
+    if (batch.material_name == "M_LavaStone"
+        || batch.material_name == "M_PorousCooledBasalt") {
+        return {
+            MaterialKind::basalt_lava_crust,
+            {0.038F, 0.031F, 0.028F},
+            {0.085F, 0.018F, 0.002F}};
+    }
+    if (batch.material_name == "M_Stone"
+        || batch.material_name == "M_GlassLikeObsidian"
+        || batch.material_name == "M_DarkSocketMetal") {
+        return {MaterialKind::rock, batch.diffuse, {0.0F, 0.0F, 0.0F}};
+    }
+    if (batch.material_name == "M_Grate") {
+        return {
+            MaterialKind::untextured,
+            {0.20F, 0.10F, 0.055F},
+            {0.16F, 0.035F, 0.004F}};
+    }
+    return {MaterialKind::untextured, batch.diffuse, batch.emission};
+}
+
+[[nodiscard]] ImportedMaterialStyle water_chamber_material_style(
+    const MaterialMeshBatch& batch)
+{
+    if (batch.material_name == "M_CarraraPolished"
+        || batch.material_name == "M_CarraraCeiling") {
+        return {
+            MaterialKind::water_marble,
+            {0.82F, 0.86F, 0.88F},
+            {0.0F, 0.0F, 0.0F}};
+    }
+    if (batch.material_name == "M_CarraraWet") {
+        return {
+            MaterialKind::water_marble,
+            {0.63F, 0.75F, 0.79F},
+            {0.0F, 0.0F, 0.0F}};
+    }
+    if (batch.material_name == "M_ClearStillWater") {
+        return {
+            MaterialKind::deep_water,
+            {0.025F, 0.18F, 0.23F},
+            {0.008F, 0.045F, 0.060F}};
+    }
+    if (batch.material_name == "M_BlueGreenInlay"
+        || batch.material_name == "M_RecessMosaic") {
+        return {
+            MaterialKind::untextured,
+            {0.025F, 0.23F, 0.25F},
+            {0.010F, 0.060F, 0.070F}};
+    }
+    if (batch.material_name == "M_CoveGlow"
+        || batch.material_name == "M_LampGlass") {
+        return {
+            MaterialKind::untextured,
+            {0.24F, 0.64F, 0.72F},
+            {0.26F, 0.78F, 0.92F}};
+    }
+    if (batch.material_name == "M_PassageDark") {
+        return {
+            MaterialKind::wet_rock,
+            {0.004F, 0.006F, 0.008F},
+            {0.0F, 0.0F, 0.0F}};
+    }
+    if (batch.material_name == "M_BlackWater") {
+        return {
+            MaterialKind::deep_water,
+            {0.012F, 0.040F, 0.055F},
+            {0.006F, 0.030F, 0.045F}};
+    }
+    if (batch.material_name == "M_Crystal") {
+        return {
+            MaterialKind::untextured,
+            {0.06F, 0.22F, 0.28F},
+            {0.20F, 0.78F, 1.0F}};
+    }
+    if (batch.material_name == "M_WetStone") {
+        return {MaterialKind::water_marble, {0.58F, 0.72F, 0.80F}, {0.0F, 0.0F, 0.0F}};
+    }
+    if (batch.material_name == "M_Silt") {
+        return {MaterialKind::soil_mineral, {0.055F, 0.060F, 0.052F}, {0.0F, 0.0F, 0.0F}};
+    }
+    if (batch.material_name == "M_LampGlass") {
+        return {
+            MaterialKind::untextured,
+            {0.18F, 0.42F, 0.50F},
+            {0.22F, 0.72F, 0.88F}};
+    }
+    if (batch.material_name == "M_Glyph") {
+        return {
+            MaterialKind::untextured,
+            {0.24F, 0.31F, 0.32F},
+            {0.035F, 0.12F, 0.15F}};
+    }
+    if (batch.material_name == "M_Niche") {
+        return {MaterialKind::water_marble, {0.22F, 0.32F, 0.38F}, {0.0F, 0.0F, 0.0F}};
+    }
+    if (batch.material_name == "M_Vault") {
+        return {MaterialKind::wet_rock, {0.16F, 0.18F, 0.17F}, {0.0F, 0.0F, 0.0F}};
+    }
+    return {MaterialKind::untextured, batch.diffuse, batch.emission};
+}
+
+[[nodiscard]] ImportedMaterialStyle earth_chamber_material_style(
+    const MaterialMeshBatch& batch)
+{
+    if (batch.material_name == "M_FloorRock") {
+        return {
+            MaterialKind::soil_mineral,
+            {0.27F, 0.17F, 0.075F},
+            {0.0F, 0.0F, 0.0F}};
+    }
+    if (batch.material_name == "M_DryStackWall") {
+        return {
+            MaterialKind::rock,
+            {0.25F, 0.19F, 0.13F},
+            {0.0F, 0.0F, 0.0F}};
+    }
+    if (batch.material_name == "M_PathStone"
+        || batch.material_name == "M_PavilionStone") {
+        return {
+            MaterialKind::soil_mineral,
+            {0.29F, 0.21F, 0.12F},
+            {0.0F, 0.0F, 0.0F}};
+    }
+    if (batch.material_name == "M_AgedIron") {
+        return {
+            MaterialKind::untextured,
+            {0.075F, 0.08F, 0.065F},
+            {0.0F, 0.0F, 0.0F}};
+    }
+    if (batch.material_name == "M_SignatureDetail") {
+        return {
+            MaterialKind::rock,
+            {0.22F, 0.16F, 0.10F},
+            {0.0F, 0.0F, 0.0F}};
+    }
+    if (batch.material_name == "M_SignatureGlow") {
+        return {
+            MaterialKind::untextured,
+            {0.20F, 0.12F, 0.04F},
+            {0.10F, 0.045F, 0.008F}};
+    }
+    if (batch.material_name == "M_StandingStone"
+        || batch.material_name == "M_StandingStone.001") {
+        return {
+            MaterialKind::rock,
+            {0.24F, 0.19F, 0.13F},
+            {0.0F, 0.0F, 0.0F}};
+    }
+    if (batch.material_name == "M_Plinth") {
+        return {
+            MaterialKind::soil_mineral,
+            {0.20F, 0.13F, 0.065F},
+            {0.0F, 0.0F, 0.0F}};
+    }
+    if (batch.material_name == "M_Rune") {
+        return {
+            MaterialKind::untextured,
+            {0.055F, 0.038F, 0.022F},
+            {0.025F, 0.012F, 0.003F}};
+    }
+    if (batch.material_name == "M_Vein") {
+        return {
+            MaterialKind::soil_mineral,
+            {0.34F, 0.20F, 0.07F},
+            {0.12F, 0.055F, 0.008F}};
+    }
+    return {MaterialKind::soil_mineral, batch.diffuse, {0.0F, 0.0F, 0.0F}};
+}
+
+[[nodiscard]] ImportedMaterialStyle air_chamber_material_style(
+    const MaterialMeshBatch& batch)
+{
+    if (batch.material_name == "M_Bark") {
+        return {MaterialKind::wood_bark, {0.24F, 0.16F, 0.085F}, {0.0F, 0.0F, 0.0F}};
+    }
+    if (batch.material_name == "M_Leaf"
+        || batch.material_name == "M_Moss") {
+        return {MaterialKind::untextured, batch.diffuse, {0.0F, 0.0F, 0.0F}};
+    }
+    if (batch.material_name == "M_Cloud") {
+        return {
+            MaterialKind::untextured,
+            {0.82F, 0.90F, 0.96F},
+            {0.035F, 0.055F, 0.075F}};
+    }
+    if (batch.material_name == "M_Inlay") {
+        return {
+            MaterialKind::untextured,
+            {0.16F, 0.22F, 0.24F},
+            {0.018F, 0.055F, 0.065F}};
+    }
+    if (batch.material_name == "M_RoofTeal") {
+        return {
+            MaterialKind::untextured,
+            {0.035F, 0.24F, 0.29F},
+            {0.008F, 0.040F, 0.048F}};
+    }
+    if (batch.material_name == "M_TrimGold") {
+        return {
+            MaterialKind::untextured,
+            {0.62F, 0.43F, 0.12F},
+            {0.055F, 0.030F, 0.004F}};
+    }
+    if (batch.material_name == "M_TunnelDark") {
+        return {MaterialKind::rock, {0.012F, 0.014F, 0.016F}, {0.0F, 0.0F, 0.0F}};
+    }
+    if (batch.material_name == "M_Shard"
+        || batch.material_name == "M_DeadShard") {
+        return {MaterialKind::rock, batch.diffuse, {0.0F, 0.0F, 0.0F}};
+    }
+    return {MaterialKind::rock, batch.diffuse, batch.emission};
+}
+
+[[nodiscard]] ImportedMaterialStyle authored_mtl_material_style(
+    const MaterialMeshBatch& batch)
+{
+    return {MaterialKind::untextured, batch.diffuse, batch.emission};
+}
+
+[[nodiscard]] MaterialModelLoadResult load_water_chamber_asset(
+    const std::filesystem::path& resource_directory)
+{
+    return load_water_chamber_render_asset(
+        resource_directory / "assets" / "models" / "WaterChamber.obj");
+}
+
+[[nodiscard]] MaterialModelLoadResult load_fire_chamber_asset(
+    const std::filesystem::path& resource_directory)
+{
+    return load_obj_material_batches(
+        resource_directory / "assets" / "models" / "FireChamber.obj");
+}
+
+[[nodiscard]] MaterialModelLoadResult load_aether_chamber_asset(
+    const std::filesystem::path& resource_directory)
+{
+    return load_obj_material_batches(
+        resource_directory / "assets" / "models" / "AetherChamber.obj");
+}
+
+[[nodiscard]] MaterialModelLoadResult load_start_chamber_asset(
+    const std::filesystem::path& resource_directory)
+{
+    return load_obj_material_batches(
+        resource_directory / "assets" / "models" / "StartChamber.obj");
+}
+
+[[nodiscard]] MaterialModelLoadResult load_exit_chamber_asset(
+    const std::filesystem::path& resource_directory)
+{
+    return load_obj_material_batches(
+        resource_directory / "assets" / "models" / "ExitChamber.obj",
+        {exit_render_excluded_object_names()});
+}
+
+[[nodiscard]] MaterialModelLoadResult load_earth_chamber_asset(
+    const std::filesystem::path& resource_directory)
+{
+    return load_obj_material_batches(
+        resource_directory / "assets" / "models" / "EarthChamber.obj");
+}
+
+[[nodiscard]] MaterialModelLoadResult load_air_chamber_asset(
+    const std::filesystem::path& resource_directory)
+{
+    return load_obj_material_batches(
+        resource_directory / "assets" / "models" / "AirChamber.obj",
+        {air_render_excluded_object_names()});
+}
+
+[[nodiscard]] MaterialModelLoadResult load_elemental_crystal_asset(
+    const std::filesystem::path& resource_directory)
+{
+    return load_obj_material_batches(
+        resource_directory / "assets" / "models" / "ElementalCrystal.obj",
+        {{"Plane.001", "SpaceBackground", "Cylinder.001"}});
+}
+
+[[nodiscard]] glm::mat4 elemental_crystal_local_model(
+    const MaterialModelObject& source,
+    const std::int32_t target_height_millimetres)
+{
+    const float source_height{
+        source.maximum_bounds[1] - source.minimum_bounds[1]};
+    if (!std::isfinite(source_height) || source_height <= 0.0F
+        || target_height_millimetres <= 0) {
+        throw std::runtime_error(
+            "The authored elemental collectible has invalid height bounds.");
+    }
+    const float scale{
+        static_cast<float>(target_height_millimetres)
+        * millimetres_to_metres / source_height};
+    const float source_center_x{
+        (source.minimum_bounds[0] + source.maximum_bounds[0]) * 0.5F};
+    const float source_center_z{
+        (source.minimum_bounds[2] + source.maximum_bounds[2]) * 0.5F};
+    glm::mat4 model{1.0F};
+    model = glm::scale(model, glm::vec3{scale});
+    return glm::translate(model, {
+        -source_center_x, -source.minimum_bounds[1], -source_center_z});
+}
 
 [[nodiscard]] std::string format_elapsed_time(const double elapsed_seconds)
 {
@@ -118,36 +452,265 @@ void require_no_opengl_error(const char* operation)
 class Application::RenderResources {
 public:
     RenderResources(
-        const std::filesystem::path& shader_directory,
+        const std::filesystem::path& resource_directory,
         const CaveSceneData& scene,
+        const MaterialModelLoadResult& authored_fire,
+        const MaterialModelLoadResult& authored_water,
+        const MaterialModelLoadResult& authored_earth,
+        const MaterialModelLoadResult& authored_air,
+        const MaterialModelLoadResult& authored_aether,
+        const MaterialModelLoadResult& authored_start,
+        const MaterialModelLoadResult& authored_exit,
         const ExitArchData& exit_arch,
         const Seed effective_seed)
         : shader_program_(
-              shader_directory / "cave_phong.vert",
-              shader_directory / "cave_phong.frag"),
+              resource_directory / "shaders" / "cave_phong.vert",
+              resource_directory / "shaders" / "cave_phong.frag"),
           rock_texture_(generate_rock_texture(effective_seed, rock_texture_stable_id)),
           wood_texture_(generate_wood_texture(effective_seed, wood_texture_stable_id))
     {
         elemental_visuals_ = scene.elemental_visuals;
         exit_arch_ = exit_arch;
+        const AuthoredChamberPlacement water_placement{
+            water_chamber_placement(scene)};
+        const AuthoredChamberPlacement fire_placement{
+            fire_chamber_placement(scene)};
+        const AuthoredChamberPlacement earth_placement{
+            earth_chamber_placement(scene)};
+        const AuthoredChamberPlacement air_placement{
+            air_chamber_placement(scene)};
+        const AuthoredChamberPlacement aether_placement{
+            aether_chamber_placement(scene)};
+        const AuthoredChamberPlacement start_placement{
+            start_chamber_placement(scene)};
+        const AuthoredChamberPlacement exit_placement{
+            exit_chamber_placement(scene)};
         pieces_.reserve(scene.mesh_pieces.size());
         for (const SceneMeshPiece& piece : scene.mesh_pieces) {
-            pieces_.push_back({piece.material, piece.albedo, std::make_unique<GpuMesh>(piece.mesh)});
+            const bool replaced_by_authored_fire{
+                piece.owner_chamber_id == std::optional<NodeId>{
+                    fire_placement.chamber_id}};
+            const bool replaced_by_authored_water{
+                piece.owner_chamber_id == std::optional<NodeId>{
+                    water_placement.chamber_id}};
+            const bool replaced_by_authored_earth{
+                piece.owner_chamber_id == std::optional<NodeId>{
+                    earth_placement.chamber_id}};
+            const bool replaced_by_authored_air{
+                piece.owner_chamber_id == std::optional<NodeId>{
+                    air_placement.chamber_id}};
+            const bool replaced_by_authored_aether{
+                piece.owner_chamber_id == std::optional<NodeId>{
+                    aether_placement.chamber_id}};
+            const bool replaced_by_authored_start{
+                piece.owner_chamber_id == std::optional<NodeId>{
+                    start_placement.chamber_id}};
+            const bool replaced_by_authored_exit{
+                piece.owner_chamber_id == std::optional<NodeId>{
+                    exit_placement.chamber_id}};
+            if (replaced_by_authored_fire || replaced_by_authored_water || replaced_by_authored_earth
+                || replaced_by_authored_air || replaced_by_authored_aether
+                || replaced_by_authored_start || replaced_by_authored_exit) {
+                continue;
+            }
+            pieces_.push_back({piece.material, piece.albedo,
+                std::make_unique<GpuMesh>(piece.mesh)});
+        }
+        glm::mat4 fire_model{1.0F};
+        fire_model = glm::translate(fire_model, {
+            static_cast<float>(fire_placement.translation_metres.x),
+            static_cast<float>(fire_placement.translation_metres.y),
+            static_cast<float>(fire_placement.translation_metres.z),
+        });
+        fire_model = glm::rotate(
+            fire_model,
+            static_cast<float>(fire_placement.yaw_radians),
+            {0.0F, 1.0F, 0.0F});
+        fire_model = glm::scale(fire_model, {
+            static_cast<float>(fire_placement.scale.x),
+            static_cast<float>(fire_placement.scale.y),
+            static_cast<float>(fire_placement.scale.z),
+        });
+        imported_fire_model_ = fire_model;
+        imported_fire_pieces_.reserve(authored_fire.batches.size());
+        std::size_t authored_vertex_count{};
+        std::size_t authored_triangle_count{};
+        for (const MaterialMeshBatch& batch : authored_fire.batches) {
+            const ImportedMaterialStyle style{fire_chamber_material_style(batch)};
+            authored_vertex_count += batch.mesh.vertices.size();
+            authored_triangle_count += batch.mesh.indices.size() / 3U;
+            imported_fire_pieces_.push_back({
+                style.kind,
+                style.albedo,
+                style.emission,
+                std::make_unique<GpuMesh>(batch.mesh),
+            });
+        }
+        glm::mat4 water_model{1.0F};
+        water_model = glm::translate(water_model, {
+            static_cast<float>(water_placement.translation_metres.x),
+            static_cast<float>(water_placement.translation_metres.y),
+            static_cast<float>(water_placement.translation_metres.z),
+        });
+        water_model = glm::rotate(
+            water_model,
+            static_cast<float>(water_placement.yaw_radians),
+            {0.0F, 1.0F, 0.0F});
+        water_model = glm::scale(water_model, {
+            static_cast<float>(water_placement.scale.x),
+            static_cast<float>(water_placement.scale.y),
+            static_cast<float>(water_placement.scale.z),
+        });
+        imported_water_model_ = water_model;
+        imported_water_pieces_.reserve(authored_water.batches.size());
+        std::size_t authored_water_vertex_count{};
+        std::size_t authored_water_triangle_count{};
+        for (const MaterialMeshBatch& batch : authored_water.batches) {
+            const ImportedMaterialStyle style{
+                water_chamber_material_style(batch)};
+            authored_water_vertex_count += batch.mesh.vertices.size();
+            authored_water_triangle_count += batch.mesh.indices.size() / 3U;
+            imported_water_pieces_.push_back({
+                style.kind,
+                style.albedo,
+                style.emission,
+                std::make_unique<GpuMesh>(batch.mesh),
+            });
+        }
+        glm::mat4 earth_model{1.0F};
+        earth_model = glm::translate(earth_model, {
+            static_cast<float>(earth_placement.translation_metres.x),
+            static_cast<float>(earth_placement.translation_metres.y),
+            static_cast<float>(earth_placement.translation_metres.z),
+        });
+        earth_model = glm::rotate(
+            earth_model,
+            static_cast<float>(earth_placement.yaw_radians),
+            {0.0F, 1.0F, 0.0F});
+        imported_earth_model_ = earth_model;
+        imported_earth_pieces_.reserve(authored_earth.batches.size());
+        std::size_t authored_earth_vertex_count{};
+        std::size_t authored_earth_triangle_count{};
+        for (const MaterialMeshBatch& batch : authored_earth.batches) {
+            const ImportedMaterialStyle style{
+                earth_chamber_material_style(batch)};
+            authored_earth_vertex_count += batch.mesh.vertices.size();
+            authored_earth_triangle_count += batch.mesh.indices.size() / 3U;
+            imported_earth_pieces_.push_back({
+                style.kind,
+                style.albedo,
+                style.emission,
+                std::make_unique<GpuMesh>(batch.mesh),
+            });
+        }
+        glm::mat4 air_model{1.0F};
+        air_model = glm::translate(air_model, {
+            static_cast<float>(air_placement.translation_metres.x),
+            static_cast<float>(air_placement.translation_metres.y),
+            static_cast<float>(air_placement.translation_metres.z),
+        });
+        air_model = glm::rotate(
+            air_model,
+            static_cast<float>(air_placement.yaw_radians),
+            {0.0F, 1.0F, 0.0F});
+        imported_air_model_ = air_model;
+        imported_air_pieces_.reserve(authored_air.batches.size());
+        std::size_t authored_air_vertex_count{};
+        std::size_t authored_air_triangle_count{};
+        for (const MaterialMeshBatch& batch : authored_air.batches) {
+            const ImportedMaterialStyle style{
+                air_chamber_material_style(batch)};
+            authored_air_vertex_count += batch.mesh.vertices.size();
+            authored_air_triangle_count += batch.mesh.indices.size() / 3U;
+            imported_air_pieces_.push_back({
+                style.kind,
+                style.albedo,
+                style.emission,
+                std::make_unique<GpuMesh>(batch.mesh),
+            });
+        }
+        const auto authored_model = [](const AuthoredChamberPlacement& placement) {
+            glm::mat4 model{1.0F};
+            model = glm::translate(model, {
+                static_cast<float>(placement.translation_metres.x),
+                static_cast<float>(placement.translation_metres.y),
+                static_cast<float>(placement.translation_metres.z),
+            });
+            model = glm::rotate(model,
+                static_cast<float>(placement.yaw_radians), {0.0F, 1.0F, 0.0F});
+            return glm::scale(model, {
+                static_cast<float>(placement.scale.x),
+                static_cast<float>(placement.scale.y),
+                static_cast<float>(placement.scale.z),
+            });
+        };
+        const auto upload_authored = [](const MaterialModelLoadResult& source,
+                                         std::vector<ImportedRenderPiece>& destination) {
+            destination.reserve(source.batches.size());
+            for (const MaterialMeshBatch& batch : source.batches) {
+                const ImportedMaterialStyle style{
+                    authored_mtl_material_style(batch)};
+                destination.push_back({style.kind, style.albedo, style.emission,
+                    std::make_unique<GpuMesh>(batch.mesh)});
+            }
+        };
+        imported_aether_model_ = authored_model(aether_placement);
+        upload_authored(authored_aether, imported_aether_pieces_);
+        imported_start_model_ = authored_model(start_placement);
+        upload_authored(authored_start, imported_start_pieces_);
+        imported_exit_model_ = authored_model(exit_placement);
+        upload_authored(authored_exit, imported_exit_pieces_);
+        const MaterialModelLoadResult authored_elemental_crystal{
+            load_elemental_crystal_asset(resource_directory)};
+        if (authored_elemental_crystal.batches.size() != 1U) {
+            throw std::runtime_error(
+                "The authored elemental collectible must contain one visible material batch.");
+        }
+        const auto elemental_crystal_source{std::find_if(
+            authored_elemental_crystal.objects.begin(),
+            authored_elemental_crystal.objects.end(),
+            [](const MaterialModelObject& object) {
+                return object.name == "Cylinder.002";
+            })};
+        if (elemental_crystal_source
+            == authored_elemental_crystal.objects.end()) {
+            throw std::runtime_error(
+                "The authored elemental collectible has no Cylinder.002 source object.");
         }
         elemental_pieces_.reserve(
             scene.elemental_visuals.opaque_draw_call_count
             + scene.elemental_visuals.transparent_effect_draw_count);
         for (const ElementalChamberVisual& chamber : elemental_visuals_.chambers) {
-            elemental_pieces_.push_back(
-                {&chamber.pedestal, std::make_unique<GpuMesh>(chamber.pedestal.mesh)});
-            elemental_pieces_.push_back(
-                {&chamber.crystal, std::make_unique<GpuMesh>(chamber.crystal.mesh)});
+            const glm::mat4 crystal_local_model{
+                elemental_crystal_local_model(
+                    *elemental_crystal_source,
+                    chamber.crystal_shape.height_millimetres)};
+            elemental_pieces_.push_back({
+                &chamber.pedestal,
+                std::make_unique<GpuMesh>(chamber.pedestal.mesh),
+                glm::mat4{1.0F},
+                chamber.element == Element::fire
+                    || chamber.element == Element::water
+                    || chamber.element == Element::earth
+                    || chamber.element == Element::air
+                    || chamber.element == Element::aether,
+            });
+            elemental_pieces_.push_back({
+                &chamber.crystal,
+                std::make_unique<GpuMesh>(
+                    authored_elemental_crystal.batches.front().mesh),
+                crystal_local_model,
+                false,
+            });
             for (const ElementalVisualPiece& decoration : chamber.decorations) {
-                elemental_pieces_.push_back(
-                    {&decoration, std::make_unique<GpuMesh>(decoration.mesh)});
+                elemental_pieces_.push_back({
+                    &decoration,
+                    std::make_unique<GpuMesh>(decoration.mesh),
+                    glm::mat4{1.0F},
+                    true,
+                });
             }
         }
-        exit_stone_mesh_ = std::make_unique<GpuMesh>(exit_arch_.stone_mesh);
         exit_portal_mesh_ = std::make_unique<GpuMesh>(exit_arch_.portal_mesh);
         exit_socket_meshes_.reserve(exit_arch_.sockets.size());
         for (const ExitSocketContract& socket : exit_arch_.sockets) {
@@ -169,7 +732,30 @@ public:
                   << "  Elemental fingerprint: "
                   << format_fingerprint(scene.elemental_visuals.fingerprint) << '\n'
                   << "  Exit arch fingerprint: "
-                  << format_fingerprint(exit_arch_.fingerprint) << '\n';
+                  << format_fingerprint(exit_arch_.fingerprint) << '\n'
+                  << "Authored Fire chamber uploaded\n"
+                  << "  Material batches: " << imported_fire_pieces_.size() << '\n'
+                  << "  Vertices: " << authored_vertex_count << '\n'
+                  << "  Triangles: " << authored_triangle_count << '\n'
+                  << "  Scale: 1:1 authored metres\n"
+                  << "Authored Water chamber uploaded\n"
+                  << "  Material batches: " << imported_water_pieces_.size() << '\n'
+                  << "  Objects: " << authored_water.objects.size() << '\n'
+                  << "  Vertices: " << authored_water_vertex_count << '\n'
+                  << "  Triangles: " << authored_water_triangle_count << '\n'
+                  << "  Authored scale: 1\n"
+                  << "Authored Earth chamber uploaded\n"
+                  << "  Material batches: " << imported_earth_pieces_.size() << '\n'
+                  << "  Objects: " << authored_earth.objects.size() << '\n'
+                  << "  Vertices: " << authored_earth_vertex_count << '\n'
+                  << "  Triangles: " << authored_earth_triangle_count << '\n'
+                  << "  Authored scale: 1\n"
+                  << "Authored Air chamber uploaded\n"
+                  << "  Material batches: " << imported_air_pieces_.size() << '\n'
+                  << "  Objects: " << authored_air.objects.size() << '\n'
+                  << "  Vertices: " << authored_air_vertex_count << '\n'
+                  << "  Triangles: " << authored_air_triangle_count << '\n'
+                  << "  Authored scale: 1\n";
     }
 
     void render(
@@ -228,6 +814,8 @@ public:
             fog.color_linear[0], fog.color_linear[1], fog.color_linear[2]});
         shader_program_.set_float("u_fog_start", fog.start_distance_metres);
         shader_program_.set_float("u_fog_end", fog.end_distance_metres);
+        validate_visual_effect_time(elapsed_seconds);
+        shader_program_.set_float("u_time_seconds", elapsed_seconds);
 
         apply_render_pass_state(opaque_render_pass);
         set_model(glm::mat4{1.0F});
@@ -235,13 +823,41 @@ public:
             set_material(piece.material, piece.albedo, {0.0F, 0.0F, 0.0F}, 1.0F);
             piece.mesh->draw();
         }
-        set_model(glm::mat4{1.0F});
-        set_material(MaterialKind::rock, {0.20F, 0.18F, 0.24F},
-            collection.all_collected()
-                ? std::array<float, 3>{0.12F, 0.035F, 0.18F}
-                : std::array<float, 3>{0.0F, 0.0F, 0.0F},
-            1.0F);
-        exit_stone_mesh_->draw();
+        set_model(imported_fire_model_);
+        for (const ImportedRenderPiece& piece : imported_fire_pieces_) {
+            set_material(piece.material, piece.albedo, piece.emission, 1.0F);
+            piece.mesh->draw();
+        }
+        set_model(imported_water_model_);
+        for (const ImportedRenderPiece& piece : imported_water_pieces_) {
+            set_material(piece.material, piece.albedo, piece.emission, 1.0F);
+            piece.mesh->draw();
+        }
+        set_model(imported_earth_model_);
+        for (const ImportedRenderPiece& piece : imported_earth_pieces_) {
+            set_material(piece.material, piece.albedo, piece.emission, 1.0F);
+            piece.mesh->draw();
+        }
+        set_model(imported_air_model_);
+        for (const ImportedRenderPiece& piece : imported_air_pieces_) {
+            set_material(piece.material, piece.albedo, piece.emission, 1.0F);
+            piece.mesh->draw();
+        }
+        set_model(imported_aether_model_);
+        for (const ImportedRenderPiece& piece : imported_aether_pieces_) {
+            set_material(piece.material, piece.albedo, piece.emission, 1.0F);
+            piece.mesh->draw();
+        }
+        set_model(imported_start_model_);
+        for (const ImportedRenderPiece& piece : imported_start_pieces_) {
+            set_material(piece.material, piece.albedo, piece.emission, 1.0F);
+            piece.mesh->draw();
+        }
+        set_model(imported_exit_model_);
+        for (const ImportedRenderPiece& piece : imported_exit_pieces_) {
+            set_material(piece.material, piece.albedo, piece.emission, 1.0F);
+            piece.mesh->draw();
+        }
 
         render_elemental_layer(ElementalRenderLayer::opaque, opaque_render_pass,
             elapsed_seconds, collection);
@@ -282,6 +898,15 @@ private:
     struct ElementalRenderPiece {
         const ElementalVisualPiece* contract{};
         std::unique_ptr<GpuMesh> mesh{};
+        glm::mat4 local_model{1.0F};
+        bool suppressed{};
+    };
+
+    struct ImportedRenderPiece {
+        MaterialKind material{MaterialKind::untextured};
+        std::array<float, 3> albedo{};
+        std::array<float, 3> emission{};
+        std::unique_ptr<GpuMesh> mesh{};
     };
 
     void set_model(const glm::mat4& model)
@@ -297,28 +922,35 @@ private:
         const std::array<float, 3>& emission,
         const float alpha)
     {
-        const MaterialParameters material{material_parameters(kind)};
-        validate_material_parameters(material);
-        shader_program_.set_integer("u_material_kind", static_cast<int>(kind));
         shader_program_.set_vector("u_albedo", {albedo[0], albedo[1], albedo[2]});
-        shader_program_.set_vector("u_material_ambient", glm::vec3{
-            material.ambient[0], material.ambient[1], material.ambient[2]});
-        shader_program_.set_vector("u_material_diffuse", glm::vec3{
-            material.diffuse[0], material.diffuse[1], material.diffuse[2]});
-        shader_program_.set_vector("u_material_specular", glm::vec3{
-            material.specular[0], material.specular[1], material.specular[2]});
         shader_program_.set_vector(
             "u_material_emission", {emission[0], emission[1], emission[2]});
-        shader_program_.set_float("u_material_shininess", material.shininess);
-        shader_program_.set_float("u_texture_scale", material.texture_scale);
-        shader_program_.set_float("u_triplanar_sharpness", material.triplanar_sharpness);
         shader_program_.set_float("u_alpha", alpha);
+        if (!bound_material_kind_.has_value() || *bound_material_kind_ != kind) {
+            const MaterialParameters material{material_parameters(kind)};
+            validate_material_parameters(material);
+            shader_program_.set_integer("u_material_kind", static_cast<int>(kind));
+            shader_program_.set_vector("u_material_ambient", glm::vec3{
+                material.ambient[0], material.ambient[1], material.ambient[2]});
+            shader_program_.set_vector("u_material_diffuse", glm::vec3{
+                material.diffuse[0], material.diffuse[1], material.diffuse[2]});
+            shader_program_.set_vector("u_material_specular", glm::vec3{
+                material.specular[0], material.specular[1], material.specular[2]});
+            shader_program_.set_float("u_material_shininess", material.shininess);
+            shader_program_.set_float("u_texture_scale", material.texture_scale);
+            shader_program_.set_float(
+                "u_triplanar_sharpness", material.triplanar_sharpness);
+            bound_material_kind_ = kind;
+        }
     }
 
     void draw_elemental(
         const ElementalRenderPiece& render_piece,
         const float elapsed_seconds)
     {
+        if (render_piece.suppressed) {
+            return;
+        }
         const ElementalVisualPiece& piece{*render_piece.contract};
         const ElementalTransformSample transform{
             sample_elemental_transform(piece, elapsed_seconds)};
@@ -329,13 +961,15 @@ private:
             static_cast<float>(transform.position_metres.z)});
         model = glm::rotate(model, transform.rotation_y_radians, {0.0F, 1.0F, 0.0F});
         model = glm::scale(model, glm::vec3{transform.uniform_scale});
+        model *= render_piece.local_model;
         set_model(model);
         const std::array<float, 3> albedo{linear_color(piece.albedo)};
         std::array<float, 3> emission{linear_color(piece.emission)};
         for (float& component : emission) {
             component *= transform.emission_multiplier;
         }
-        set_material(piece.material, albedo, emission, piece.alpha_milli / 1'000.0F);
+        set_material(piece.material, albedo, emission,
+            static_cast<float>(piece.alpha_milli) / 1'000.0F);
         render_piece.mesh->draw();
     }
 
@@ -396,12 +1030,26 @@ private:
     GpuTexture rock_texture_;
     GpuTexture wood_texture_;
     std::vector<RenderPiece> pieces_{};
+    glm::mat4 imported_fire_model_{1.0F};
+    std::vector<ImportedRenderPiece> imported_fire_pieces_{};
+    glm::mat4 imported_water_model_{1.0F};
+    std::vector<ImportedRenderPiece> imported_water_pieces_{};
+    glm::mat4 imported_earth_model_{1.0F};
+    std::vector<ImportedRenderPiece> imported_earth_pieces_{};
+    glm::mat4 imported_air_model_{1.0F};
+    std::vector<ImportedRenderPiece> imported_air_pieces_{};
+    glm::mat4 imported_aether_model_{1.0F};
+    std::vector<ImportedRenderPiece> imported_aether_pieces_{};
+    glm::mat4 imported_start_model_{1.0F};
+    std::vector<ImportedRenderPiece> imported_start_pieces_{};
+    glm::mat4 imported_exit_model_{1.0F};
+    std::vector<ImportedRenderPiece> imported_exit_pieces_{};
     ElementalSceneData elemental_visuals_{};
     std::vector<ElementalRenderPiece> elemental_pieces_{};
     ExitArchData exit_arch_{};
-    std::unique_ptr<GpuMesh> exit_stone_mesh_{};
     std::unique_ptr<GpuMesh> exit_portal_mesh_{};
     std::vector<std::unique_ptr<GpuMesh>> exit_socket_meshes_{};
+    std::optional<MaterialKind> bound_material_kind_{};
 #if !defined(NDEBUG)
     bool first_frame_validated_{};
 #endif
@@ -409,12 +1057,33 @@ private:
 
 Application::Application(
     CaveGenerationResult generation,
-    SeedSource seed_source)
+    SeedSource seed_source,
+    const std::optional<std::uint32_t> profile_seconds,
+    const bool profile_vsync,
+    const bool automated_profile_traversal)
     : generation_(std::move(generation)),
-      seed_source_(std::move(seed_source))
+      seed_source_(std::move(seed_source)),
+      profile_seconds_(profile_seconds),
+      profile_vsync_(profile_vsync)
 {
     if (!seed_source_) {
         throw std::invalid_argument("Application requires a New Cave seed source.");
+    }
+    if (profile_seconds_.has_value()) {
+        frame_profiler_.emplace(
+            profile_warmup_seconds,
+            static_cast<double>(*profile_seconds_),
+            static_cast<std::size_t>(*profile_seconds_)
+                * expected_maximum_profile_hertz);
+    }
+    if (automated_profile_traversal) {
+        if (!profile_seconds_.has_value()) {
+            throw std::invalid_argument(
+                "Automated profile traversal requires a measured duration.");
+        }
+        profile_traversal_ = build_profile_traversal_workload(generation_);
+        profile_waypoint_index_ = profile_traversal_->waypoints_metres.size() > 1U
+            ? 1U : 0U;
     }
 }
 
@@ -434,6 +1103,20 @@ int Application::run()
 void Application::initialize()
 {
     const std::filesystem::path resources = resource_root();
+    const MaterialModelLoadResult authored_fire{
+        load_fire_chamber_asset(resources)};
+    const MaterialModelLoadResult authored_water{
+        load_water_chamber_asset(resources)};
+    const MaterialModelLoadResult authored_earth{
+        load_earth_chamber_asset(resources)};
+    const MaterialModelLoadResult authored_air{
+        load_air_chamber_asset(resources)};
+    const MaterialModelLoadResult authored_aether{
+        load_aether_chamber_asset(resources)};
+    const MaterialModelLoadResult authored_start{
+        load_start_chamber_asset(resources)};
+    const MaterialModelLoadResult authored_exit{
+        load_exit_chamber_asset(resources)};
     const GeometryVector3& position{generation_.scene.start_camera_position_metres};
     const GeometryVector3& forward{generation_.scene.start_camera_forward};
     camera_.set_pose(
@@ -441,8 +1124,34 @@ void Application::initialize()
          static_cast<float>(position.z)},
         {static_cast<float>(forward.x), static_cast<float>(forward.y),
          static_cast<float>(forward.z)});
+    CollisionWorld collision_world{build_collision_world(generation_.scene)};
+    append_authored_chamber_collision(
+        collision_world,
+        build_fire_chamber_collision(
+            authored_fire, fire_chamber_placement(generation_.scene)));
+    append_authored_chamber_collision(
+        collision_world,
+        build_water_chamber_collision(
+            authored_water, water_chamber_placement(generation_.scene)));
+    append_authored_chamber_collision(
+        collision_world,
+        build_earth_chamber_collision(
+            authored_earth, earth_chamber_placement(generation_.scene)));
+    append_authored_chamber_collision(
+        collision_world,
+        build_air_chamber_collision(
+            authored_air, air_chamber_placement(generation_.scene)));
+    append_authored_chamber_collision(collision_world,
+        build_aether_chamber_collision(
+            authored_aether, aether_chamber_placement(generation_.scene)));
+    append_authored_chamber_collision(collision_world,
+        build_start_chamber_collision(
+            authored_start, start_chamber_placement(generation_.scene)));
+    append_authored_chamber_collision(collision_world,
+        build_exit_chamber_collision(
+            authored_exit, exit_chamber_placement(generation_.scene)));
     controller_ = std::make_unique<GroundedController>(
-        build_collision_world(generation_.scene), find_start_spawn(generation_));
+        std::move(collision_world), find_start_spawn(generation_));
     interaction_targets_ = build_crystal_interaction_targets(
         generation_.scene.elemental_visuals);
     visibility_world_ = build_crystal_visibility_world(generation_.scene);
@@ -481,8 +1190,20 @@ void Application::initialize()
     clear_runtime_input();
 
     render_resources_ = std::make_unique<RenderResources>(
-        resources / "shaders", generation_.scene, exit_arch_,
+        resources, generation_.scene, authored_fire, authored_water, authored_earth,
+        authored_air, authored_aether, authored_start, authored_exit, exit_arch_,
         generation_.generation.effective_seed);
+    if (profile_traversal_.has_value()) {
+        apply_transition(game_session_.begin_exploration(GameClock::now()));
+        movement_input_blocked_ = false;
+        std::cout << "Profile traversal workload\n"
+                  << "  Fingerprint: "
+                  << format_fingerprint(profile_traversal_->fingerprint) << '\n'
+                  << "  Chamber visits: "
+                  << profile_traversal_->chamber_visit_order.size() << '\n'
+                  << "  Waypoints: "
+                  << profile_traversal_->waypoints_metres.size() << '\n';
+    }
     std::cout << "Generated cave scene\n"
               << "  Mesh pieces: " << generation_.scene.mesh_pieces.size() << '\n'
               << "  Static vertices: " << generation_.scene.static_vertex_count << '\n'
@@ -520,7 +1241,7 @@ void Application::initialize_window()
     }
 
     glfwMakeContextCurrent(window_);
-    glfwSwapInterval(1);
+    glfwSwapInterval(profile_seconds_.has_value() && !profile_vsync_ ? 0 : 1);
 }
 
 void Application::initialize_opengl()
@@ -580,6 +1301,7 @@ void Application::run_frame_loop()
 {
     double previous_time = glfwGetTime();
     while (glfwWindowShouldClose(window_) == GLFW_FALSE) {
+        const double frame_started = glfwGetTime();
         const double current_time = glfwGetTime();
         const double elapsed = std::max(0.0, current_time - previous_time);
         const GameTimePoint game_now{GameClock::now()};
@@ -611,8 +1333,40 @@ void Application::run_frame_loop()
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
+        const double before_present = glfwGetTime();
         glfwSwapBuffers(window_);
+        const double after_present = glfwGetTime();
         glfwPollEvents();
+        if (frame_profiler_.has_value()) {
+            const double frame_finished{glfwGetTime()};
+            if (frame_profiler_->record({
+                    (frame_finished - frame_started) * 1'000.0,
+                    (before_present - frame_started) * 1'000.0,
+                    (after_present - before_present) * 1'000.0})) {
+                const FrameProfileSummary summary{frame_profiler_->summary()};
+                std::cout << std::fixed << std::setprecision(3)
+                          << "Frame profile complete\n"
+                          << "  Resolution: " << framebuffer_width_ << 'x'
+                          << framebuffer_height_ << '\n'
+                          << "  VSync: " << (profile_vsync_ ? "on" : "off") << '\n'
+                          << "  Warm-up seconds: " << profile_warmup_seconds << '\n'
+                          << "  Measured seconds: " << *profile_seconds_ << '\n'
+                          << "  Samples: " << summary.sample_count << '\n'
+                          << "  Median frame time (ms): "
+                          << summary.median_milliseconds << '\n'
+                          << "  P95 frame time (ms): "
+                          << summary.p95_milliseconds << '\n'
+                          << "  Median CPU before present (ms): "
+                          << summary.median_cpu_before_present_milliseconds << '\n'
+                          << "  P95 CPU before present (ms): "
+                          << summary.p95_cpu_before_present_milliseconds << '\n'
+                          << "  Median present wait (ms): "
+                          << summary.median_present_milliseconds << '\n'
+                          << "  P95 present wait (ms): "
+                          << summary.p95_present_milliseconds << '\n';
+                glfwSetWindowShouldClose(window_, GLFW_TRUE);
+            }
+        }
     }
 }
 
@@ -622,11 +1376,48 @@ void Application::process_movement(const float delta_seconds)
         return;
     }
     GroundedMovementInput input{};
-    input.view_yaw_degrees = camera_.yaw_degrees();
+    if (profile_traversal_.has_value()
+        && !profile_traversal_->waypoints_metres.empty()) {
+        const GeometryVector3 position{controller_->state().feet_position_metres};
+        constexpr double waypoint_radius_metres{0.30};
+        std::size_t checked{};
+        while (checked < profile_traversal_->waypoints_metres.size()) {
+            const GeometryVector3& target{
+                profile_traversal_->waypoints_metres[profile_waypoint_index_]};
+            if (std::hypot(target.x - position.x, target.z - position.z)
+                > waypoint_radius_metres) {
+                break;
+            }
+            ++profile_waypoint_index_;
+            if (profile_waypoint_index_
+                >= profile_traversal_->waypoints_metres.size()) {
+                profile_waypoint_index_ = profile_traversal_->waypoints_metres.size() > 1U
+                    ? 1U : 0U;
+            }
+            ++checked;
+        }
+        const GeometryVector3& target{
+            profile_traversal_->waypoints_metres[profile_waypoint_index_]};
+        constexpr double radians_to_degrees{57.29577951308232};
+        const double yaw_degrees{
+            std::atan2(target.z - position.z, target.x - position.x)
+            * radians_to_degrees};
+        input.view_yaw_degrees = yaw_degrees;
+        input.forward = 1.0;
+        const GeometryVector3 camera_position{controller_->camera_position_metres()};
+        camera_.set_pose(
+            {static_cast<float>(camera_position.x),
+             static_cast<float>(camera_position.y),
+             static_cast<float>(camera_position.z)},
+            {static_cast<float>(target.x - position.x), 0.0F,
+             static_cast<float>(target.z - position.z)});
+    } else {
+        input.view_yaw_degrees = camera_.yaw_degrees();
+    }
     if (movement_input_blocked_) {
         movement_input_blocked_ = !gameplay_keys_released();
     }
-    if (!movement_input_blocked_) {
+    if (!movement_input_blocked_ && !profile_traversal_.has_value()) {
         input.forward = (key_is_down(window_, GLFW_KEY_W) ? 1.0F : 0.0F)
             - (key_is_down(window_, GLFW_KEY_S) ? 1.0F : 0.0F);
         input.right = (key_is_down(window_, GLFW_KEY_D) ? 1.0F : 0.0F)
@@ -942,8 +1733,53 @@ void Application::rebuild_run(const Seed requested_seed)
 {
     CaveGenerationResult candidate_generation{generate_cave(requested_seed)};
     ExitArchData candidate_arch{build_exit_arch(candidate_generation)};
+    const MaterialModelLoadResult authored_fire{
+        load_fire_chamber_asset(resource_root())};
+    const MaterialModelLoadResult authored_water{
+        load_water_chamber_asset(resource_root())};
+    const MaterialModelLoadResult authored_earth{
+        load_earth_chamber_asset(resource_root())};
+    const MaterialModelLoadResult authored_air{
+        load_air_chamber_asset(resource_root())};
+    const MaterialModelLoadResult authored_aether{
+        load_aether_chamber_asset(resource_root())};
+    const MaterialModelLoadResult authored_start{
+        load_start_chamber_asset(resource_root())};
+    const MaterialModelLoadResult authored_exit{
+        load_exit_chamber_asset(resource_root())};
+    CollisionWorld candidate_collision_world{
+        build_collision_world(candidate_generation.scene)};
+    append_authored_chamber_collision(
+        candidate_collision_world,
+        build_fire_chamber_collision(
+            authored_fire,
+            fire_chamber_placement(candidate_generation.scene)));
+    append_authored_chamber_collision(
+        candidate_collision_world,
+        build_water_chamber_collision(
+            authored_water,
+            water_chamber_placement(candidate_generation.scene)));
+    append_authored_chamber_collision(
+        candidate_collision_world,
+        build_earth_chamber_collision(
+            authored_earth,
+            earth_chamber_placement(candidate_generation.scene)));
+    append_authored_chamber_collision(
+        candidate_collision_world,
+        build_air_chamber_collision(
+            authored_air,
+            air_chamber_placement(candidate_generation.scene)));
+    append_authored_chamber_collision(candidate_collision_world,
+        build_aether_chamber_collision(authored_aether,
+            aether_chamber_placement(candidate_generation.scene)));
+    append_authored_chamber_collision(candidate_collision_world,
+        build_start_chamber_collision(authored_start,
+            start_chamber_placement(candidate_generation.scene)));
+    append_authored_chamber_collision(candidate_collision_world,
+        build_exit_chamber_collision(authored_exit,
+            exit_chamber_placement(candidate_generation.scene)));
     auto candidate_controller{std::make_unique<GroundedController>(
-        build_collision_world(candidate_generation.scene),
+        std::move(candidate_collision_world),
         find_start_spawn(candidate_generation))};
     std::vector<CrystalInteractionTarget> candidate_targets{
         build_crystal_interaction_targets(
@@ -951,7 +1787,9 @@ void Application::rebuild_run(const Seed requested_seed)
     VisibilityWorld candidate_visibility{
         build_crystal_visibility_world(candidate_generation.scene)};
     auto candidate_resources{std::make_unique<RenderResources>(
-        resource_root() / "shaders", candidate_generation.scene, candidate_arch,
+        resource_root(), candidate_generation.scene, authored_fire, authored_water,
+        authored_earth, authored_air, authored_aether, authored_start, authored_exit,
+        candidate_arch,
         candidate_generation.generation.effective_seed)};
 
     generation_ = std::move(candidate_generation);

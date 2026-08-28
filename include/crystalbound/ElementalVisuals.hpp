@@ -30,7 +30,12 @@ enum class ElementalPieceKind : std::uint8_t {
     crystal,
     lava_rock,
     glowing_crack,
+    lavafall,
+    ember_vent,
     water_surface,
+    waterfall,
+    water_bank,
+    water_plant,
     earth_pillar,
     earth_stalagmite,
     air_wood_spire,
@@ -38,6 +43,7 @@ enum class ElementalPieceKind : std::uint8_t {
     orbiting_rock,
     fog_ribbon,
     particle_cluster,
+    formation_batch,
 };
 
 enum class ElementalRenderLayer : std::uint8_t {
@@ -45,6 +51,55 @@ enum class ElementalRenderLayer : std::uint8_t {
     emissive,
     transparent,
     additive,
+};
+
+enum class FormationAttachmentSurface : std::uint8_t {
+    floor,
+    wall,
+    ceiling,
+    suspended,
+};
+
+enum class ElementalMotifFamily : std::uint8_t {
+    fire_basalt,
+    fire_lava_terrace,
+    fire_ember_vent,
+    water_wet_stone,
+    water_eroded_bank,
+    water_reed_spire,
+    earth_pillar,
+    earth_stalagmite,
+    earth_shelf,
+    air_timber,
+    air_slender_spire,
+    air_suspended_frame,
+    aether_arch,
+    aether_orbit,
+    aether_shard,
+};
+
+struct ElementalChamberSpatialContract {
+    NodeId chamber_id{};
+    IntegerPoint3 center_millimetres{};
+    std::int32_t usable_radius_millimetres{};
+    std::int32_t usable_height_millimetres{};
+    std::vector<IntegerPoint3> portal_centers_millimetres{};
+};
+
+struct ElementalFormationInstance {
+    Element element{Element::fire};
+    ElementalMotifFamily motif{ElementalMotifFamily::fire_basalt};
+    std::uint64_t stable_object_id{};
+    std::uint64_t render_batch_id{};
+    std::uint32_t group_id{};
+    IntegerPoint3 position_millimetres{};
+    std::uint32_t scale_milli{1'000U};
+    std::int32_t rotation_millidegrees{};
+    FormationAttachmentSurface attachment{FormationAttachmentSurface::floor};
+    IntegerPoint3 bounds_minimum_millimetres{};
+    IntegerPoint3 bounds_maximum_millimetres{};
+    bool keep_clear_verified{};
+    bool dominant_landmark{};
 };
 
 struct LinearColorMilli {
@@ -128,12 +183,14 @@ struct ElementalChamberVisual {
     ElementalVisualPiece pedestal{};
     ElementalVisualPiece crystal{};
     MeshData socket_crystal_mesh{};
+    std::vector<ElementalFormationInstance> formations{};
     std::vector<ElementalVisualPiece> decorations{};
     std::uint64_t fingerprint{};
 };
 
 struct ElementalSceneData {
     std::vector<ElementalChamberVisual> chambers{};
+    std::vector<ElementalChamberSpatialContract> spatial_contracts{};
     std::uint32_t generated_vertex_count{};
     std::uint32_t opaque_draw_call_count{};
     std::uint32_t transparent_effect_draw_count{};
@@ -161,9 +218,12 @@ struct ElementalTransformSample {
 [[nodiscard]] std::optional<Element> element_for_chamber(
     const TopologyData& topology,
     NodeId chamber_id) noexcept;
+[[nodiscard]] GeometryVector3 crystal_visible_body_aim_point(
+    const ElementalChamberVisual& chamber) noexcept;
 [[nodiscard]] ElementalSceneData build_elemental_scene(
     const TopologyData& topology,
-    Seed effective_seed);
+    Seed effective_seed,
+    const std::vector<ElementalChamberSpatialContract>& spatial_contracts);
 [[nodiscard]] std::vector<std::string> validate_elemental_scene(
     const TopologyData& topology,
     const ElementalSceneData& visuals);

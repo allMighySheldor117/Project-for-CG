@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "crystalbound/ChamberTemplates.hpp"
 #include "crystalbound/Generation.hpp"
 
 namespace crystalbound {
@@ -23,7 +24,30 @@ inline constexpr std::array<std::uint32_t, 4> rock_octave_weights{8U, 4U, 2U, 1U
 inline constexpr std::array<std::uint32_t, 3> wood_lattice_sizes{8U, 16U, 32U};
 inline constexpr std::array<std::uint32_t, 3> wood_octave_weights{4U, 2U, 1U};
 
-enum class MaterialKind : std::uint8_t { rock, wood, untextured };
+enum class MaterialKind : std::uint8_t {
+    rock,
+    wood,
+    untextured,
+    basalt_lava_crust,
+    lava,
+    wet_rock,
+    shallow_water,
+    deep_water,
+    soil_mineral,
+    wood_bark,
+    aether_crystal,
+    mist,
+    water_marble,
+};
+enum class MaterialProjection : std::uint8_t { triplanar, regular_uv, none };
+enum class MaterialEffect : std::uint8_t {
+    none,
+    lava_flow,
+    water_ripple,
+    drifting_mist,
+    wind,
+    aether_pulse,
+};
 enum class TextureFormat : std::uint8_t { r8_linear, srgb8 };
 enum class TextureWrap : std::uint8_t { repeat };
 enum class TextureFilter : std::uint8_t { linear };
@@ -116,6 +140,25 @@ inline constexpr RenderPassState additive_effect_render_pass{
 inline constexpr RenderPassState ui_render_pass{
     false, false, false, CullMode::none, BlendMode::straight_alpha};
 
+struct MaterialProfile {
+    MaterialKind kind{MaterialKind::rock};
+    MaterialProjection projection{MaterialProjection::triplanar};
+    MaterialEffect effect{MaterialEffect::none};
+    RenderPassState pass{};
+    std::uint32_t mask_bytes{};
+    bool visual_time_only{};
+};
+
+struct MaterialBudgetLimits {
+    std::uint32_t maximum_profiles{16U};
+    std::uint64_t maximum_mask_bytes{2U * 1024U * 1024U};
+};
+
+struct MaterialBudgetUsage {
+    std::uint32_t profile_count{};
+    std::uint64_t mask_bytes{};
+};
+
 inline constexpr std::uint32_t wood_band_period_pixels{32U};
 inline constexpr std::array<std::uint8_t, 3> wood_dark_palette{58U, 30U, 13U};
 inline constexpr std::array<std::uint8_t, 3> wood_light_palette{166U, 102U, 44U};
@@ -145,8 +188,18 @@ void validate_texture_image(const TextureImage& image);
 
 [[nodiscard]] TextureImage generate_rock_texture(Seed seed, std::uint64_t stable_object_id);
 [[nodiscard]] TextureImage generate_wood_texture(Seed seed, std::uint64_t stable_object_id);
+[[nodiscard]] TextureImage generate_material_mask(
+    Seed seed, MaterialKind profile, std::uint64_t stable_object_id);
 
 [[nodiscard]] MaterialParameters material_parameters(MaterialKind material);
+[[nodiscard]] MaterialProfile material_profile(MaterialKind material);
+[[nodiscard]] MaterialKind material_for_template_surface(
+    TemplateSurfaceKind surface);
+[[nodiscard]] std::vector<MaterialKind> required_cave_material_profiles();
+[[nodiscard]] MaterialBudgetUsage accumulate_material_budget(
+    const std::vector<MaterialKind>& profiles,
+    MaterialBudgetLimits limits = {});
+void validate_visual_effect_time(float elapsed_seconds);
 void validate_material_parameters(const MaterialParameters& material);
 [[nodiscard]] std::array<float, 3> triplanar_blend_weights(
     const std::array<float, 3>& world_normal, float sharpness);

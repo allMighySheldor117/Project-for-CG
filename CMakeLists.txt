@@ -78,16 +78,20 @@ target_link_libraries(tinyobjloader_impl
 )
 
 add_library(crystalbound_core STATIC
+    src/AuthoredChamber.cpp
     src/Camera.cpp
     src/CaveGeneration.cpp
     src/CaveSceneFingerprint.cpp
     src/CaveSceneGeneration.cpp
+    src/ChamberTemplates.cpp
+    src/ChamberStructure.cpp
     src/CaveSceneValidation.cpp
     src/CommandLine.cpp
     src/CrystalCollection.cpp
     src/DeterministicRandom.cpp
     src/ElementalVisuals.cpp
     src/ExitArch.cpp
+    src/FrameProfile.cpp
     src/GameLoop.cpp
     src/Generation.cpp
     src/GenerationTypes.cpp
@@ -97,6 +101,7 @@ add_library(crystalbound_core STATIC
     src/MeshData.cpp
     src/ObjLoader.cpp
     src/PlayerController.cpp
+    src/ProfileTraversal.cpp
     src/Reachability.cpp
     src/Rendering.cpp
     src/TopologyFingerprint.cpp
@@ -177,16 +182,36 @@ crystalbound_enable_first_party_warnings(crystalbound)
 if(CRYSTALBOUND_BUILD_TESTS)
     enable_testing()
 
+    add_library(crystalbound_test_support STATIC
+        tests/support/SeedCorpus.cpp
+        tests/support/SeedManifest.cpp
+    )
+    target_compile_features(crystalbound_test_support PUBLIC cxx_std_17)
+    set_target_properties(crystalbound_test_support PROPERTIES
+        CXX_EXTENSIONS OFF
+    )
+    target_include_directories(crystalbound_test_support
+        PUBLIC
+            tests/support
+    )
+    target_link_libraries(crystalbound_test_support
+        PUBLIC
+            crystalbound_core
+    )
+    crystalbound_enable_first_party_warnings(crystalbound_test_support)
+
     add_executable(crystalbound_tests
         tests/unit/CaveSceneTests.cpp
         tests/unit/CrystalCollectionTests.cpp
         tests/unit/ElementalVisualsTests.cpp
+        tests/unit/FrameProfileTests.cpp
         tests/unit/GeometryTests.cpp
         tests/unit/GenerationTests.cpp
         tests/unit/GameLoopTests.cpp
         tests/unit/PlayerControllerTests.cpp
         tests/unit/ReachabilityTests.cpp
         tests/unit/RenderingTests.cpp
+        tests/unit/SeedCorpusTests.cpp
         tests/unit/TestMain.cpp
     )
     target_compile_features(crystalbound_tests PRIVATE cxx_std_17)
@@ -196,7 +221,9 @@ if(CRYSTALBOUND_BUILD_TESTS)
     target_link_libraries(crystalbound_tests
         PRIVATE
             crystalbound_core
+            crystalbound_test_support
     )
+    target_include_directories(crystalbound_tests PRIVATE tests/support)
     crystalbound_enable_first_party_warnings(crystalbound_tests)
 
     add_custom_command(
@@ -205,7 +232,55 @@ if(CRYSTALBOUND_BUILD_TESTS)
         COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/testdata"
                 "$<TARGET_FILE_DIR:crystalbound_tests>/testdata"
-        COMMENT "Copying Crystalbound test fixtures"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/WaterChamber.obj"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/WaterChamber.obj"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/WaterChamber.mtl"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/WaterChamber.mtl"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/EarthChamber.obj"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/EarthChamber.obj"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/EarthChamber.mtl"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/EarthChamber.mtl"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/AirChamber.obj"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/AirChamber.obj"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/AirChamber.mtl"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/AirChamber.mtl"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/FireChamber.obj"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/FireChamber.obj"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/FireChamber.mtl"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/FireChamber.mtl"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/AetherChamber.obj"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/AetherChamber.obj"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/AetherChamber.mtl"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/AetherChamber.mtl"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/ExitChamber.obj"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/ExitChamber.obj"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/ExitChamber.mtl"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/ExitChamber.mtl"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/StartChamber.obj"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/StartChamber.obj"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/StartChamber.mtl"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/StartChamber.mtl"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/ElementalCrystal.obj"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/ElementalCrystal.obj"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/ElementalCrystal.mtl"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/ElementalCrystal.mtl"
+       COMMENT "Copying Crystalbound test fixtures"
         VERBATIM
     )
 
@@ -214,6 +289,71 @@ if(CRYSTALBOUND_BUILD_TESTS)
         COMMAND crystalbound_tests
                 "$<TARGET_FILE_DIR:crystalbound_tests>/testdata"
     )
+    add_test(
+        NAME crystalbound_structural_tests
+        COMMAND crystalbound_tests
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata"
+                --exclude-golden
+    )
+    set_tests_properties(crystalbound_structural_tests PROPERTIES
+        LABELS structural
+    )
+
+    add_executable(crystalbound_seed_corpus
+        tests/tools/SeedCorpusMain.cpp
+    )
+    target_compile_features(crystalbound_seed_corpus PRIVATE cxx_std_17)
+    set_target_properties(crystalbound_seed_corpus PROPERTIES
+        CXX_EXTENSIONS OFF
+    )
+    target_link_libraries(crystalbound_seed_corpus
+        PRIVATE
+            crystalbound_test_support
+    )
+    crystalbound_enable_first_party_warnings(crystalbound_seed_corpus)
+
+    add_executable(crystalbound_profile_runner
+        src/Application.cpp
+        src/GpuMesh.cpp
+        src/GpuTexture.cpp
+        src/ResourcePaths.cpp
+        src/ShaderProgram.cpp
+        tests/tools/ProfileTraversalMain.cpp
+    )
+    target_compile_features(crystalbound_profile_runner PRIVATE cxx_std_17)
+    set_target_properties(crystalbound_profile_runner PROPERTIES
+        CXX_EXTENSIONS OFF
+    )
+    target_include_directories(crystalbound_profile_runner PRIVATE include)
+    target_compile_definitions(crystalbound_profile_runner PRIVATE GLFW_INCLUDE_NONE)
+    if(WIN32)
+        target_compile_definitions(crystalbound_profile_runner PRIVATE
+            NOMINMAX
+            WIN32_LEAN_AND_MEAN
+        )
+    endif()
+    target_link_libraries(crystalbound_profile_runner
+        PRIVATE
+            glad
+            glfw
+            glm::glm
+            imgui
+            crystalbound_core
+    )
+    crystalbound_enable_first_party_warnings(crystalbound_profile_runner)
+    foreach(resource_directory IN ITEMS assets shaders)
+        add_custom_command(
+            TARGET crystalbound_profile_runner
+            POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "$<TARGET_FILE_DIR:crystalbound_profile_runner>/resources/${resource_directory}"
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                    "${CMAKE_CURRENT_SOURCE_DIR}/${resource_directory}"
+                    "$<TARGET_FILE_DIR:crystalbound_profile_runner>/resources/${resource_directory}"
+            COMMENT "Copying ${resource_directory} resources for traversal profile"
+            VERBATIM
+        )
+    endforeach()
 endif()
 
 foreach(resource_directory IN ITEMS assets shaders)

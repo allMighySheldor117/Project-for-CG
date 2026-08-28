@@ -27,7 +27,7 @@ struct GeneratorVersion {
     std::uint32_t value{};
 };
 
-inline constexpr GeneratorVersion current_generator_version{1U};
+inline constexpr GeneratorVersion current_generator_version{3U};
 
 struct TopologyLimits {
     std::int32_t horizontal_anchor_millimetres{};
@@ -39,12 +39,48 @@ struct TopologyLimits {
 };
 
 inline constexpr TopologyLimits topology_limits{
-    30'000,
+    450'000,
     5'000,
     4'000,
     2'000,
     360'000,
     8U,
+};
+
+struct LayoutCapacityContract {
+    std::int32_t maximum_chamber_outer_radius_millimetres{};
+    std::int32_t chamber_safety_separation_millimetres{};
+    std::int32_t minimum_portal_landing_millimetres{};
+    std::int32_t minimum_portal_clearance_millimetres{};
+};
+
+inline constexpr LayoutCapacityContract layout_capacity_contract{
+    12'500,
+    3'000,
+    1'500,
+    2'300,
+};
+
+inline constexpr std::int32_t authored_water_anchor_radius_millimetres{90'000};
+inline constexpr std::int32_t authored_water_playable_radius_millimetres{33'000};
+inline constexpr std::int32_t authored_water_landing_height_millimetres{1'650};
+inline constexpr std::int32_t authored_water_maximum_step_millimetres{236};
+inline constexpr std::int32_t authored_water_crystal_base_height_millimetres{2'553};
+inline constexpr std::int32_t authored_fire_anchor_radius_millimetres{110'000};
+inline constexpr std::int32_t authored_fire_playable_radius_millimetres{32'000};
+inline constexpr std::int32_t authored_fire_landing_height_millimetres{850};
+inline constexpr std::int32_t authored_fire_maximum_step_millimetres{300};
+inline constexpr std::int32_t authored_fire_crystal_base_height_millimetres{1'950};
+inline constexpr std::int32_t authored_earth_anchor_radius_millimetres{90'000};
+inline constexpr std::int32_t authored_earth_playable_radius_millimetres{25'000};
+inline constexpr std::int32_t authored_air_anchor_radius_millimetres{100'000};
+inline constexpr std::int32_t authored_air_playable_radius_millimetres{27'000};
+
+struct ChamberDimensionBand {
+    std::int32_t minimum_ring_radius_millimetres{};
+    std::int32_t maximum_ring_radius_millimetres{};
+    std::int32_t minimum_interior_height_millimetres{};
+    std::int32_t maximum_interior_height_millimetres{};
 };
 
 inline constexpr Seed fallback_effective_seed{0x4352595354414C42ULL};
@@ -294,7 +330,11 @@ struct GenerationTestSeams {
 [[nodiscard]] Seed derive_attempt_seed(Seed requested_seed, std::uint32_t attempt_index);
 [[nodiscard]] TopologyData generate_topology_attempt(Seed attempt_seed);
 [[nodiscard]] TopologyData known_good_fallback_topology();
+[[nodiscard]] ChamberDimensionBand planned_chamber_dimension_band(
+    const ChamberNode& node) noexcept;
 [[nodiscard]] std::vector<std::string> validate_topology(const TopologyData& topology);
+[[nodiscard]] std::vector<std::string> validate_layout_capacity(
+    const TopologyData& topology);
 [[nodiscard]] std::uint64_t topology_fingerprint(
     Seed requested_seed,
     Seed attempt_seed,

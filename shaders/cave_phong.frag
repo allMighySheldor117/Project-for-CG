@@ -2,7 +2,18 @@
 
 const int maximum_point_lights = 8;
 const int rock_material = 0;
+const int wood_material = 1;
 const int untextured_material = 2;
+const int basalt_material = 3;
+const int lava_material = 4;
+const int wet_rock_material = 5;
+const int shallow_water_material = 6;
+const int deep_water_material = 7;
+const int soil_material = 8;
+const int bark_material = 9;
+const int aether_material = 10;
+const int mist_material = 11;
+const int water_marble_material = 12;
 const float minimum_weight_sum = 0.000001;
 
 struct PointLight {
@@ -29,6 +40,7 @@ uniform float u_alpha;
 uniform float u_material_shininess;
 uniform float u_texture_scale;
 uniform float u_triplanar_sharpness;
+uniform float u_time_seconds;
 uniform int u_material_kind;
 uniform sampler2D u_rock_texture;
 uniform sampler2D u_wood_texture;
@@ -53,14 +65,70 @@ float rock_noise(vec3 normal)
 
 vec3 surface_color(vec3 normal)
 {
+    float noise = rock_noise(normal);
     if (u_material_kind == rock_material) {
-        return u_albedo * mix(0.54, 1.16, rock_noise(normal));
+        return u_albedo * mix(0.54, 1.16, noise);
     }
     if (u_material_kind == untextured_material) {
         return u_albedo;
     }
+    if (u_material_kind == basalt_material) {
+        float pulse = 0.5 + 0.5 * sin(u_time_seconds * 1.4
+            + world_position.x * 1.2 + world_position.z * 1.5);
+        float cracks = smoothstep(0.69, 0.86, noise + pulse * 0.10);
+        return mix(u_albedo * mix(0.22, 0.58, noise),
+            vec3(1.0, 0.12, 0.006), cracks);
+    }
+    if (u_material_kind == lava_material) {
+        float flow = 0.5 + 0.5 * sin(world_position.x * 1.8
+            + world_position.z * 1.35 + u_time_seconds * 1.7);
+        return mix(vec3(0.42, 0.012, 0.001), vec3(1.0, 0.32, 0.008),
+            clamp(noise * 0.62 + flow * 0.55, 0.0, 1.0));
+    }
+    if (u_material_kind == wet_rock_material) {
+        return u_albedo * mix(0.30, 0.78, noise);
+    }
+    if (u_material_kind == water_marble_material) {
+        float broad_vein = abs(sin(world_position.x * 0.34
+            + world_position.y * 0.18 + world_position.z * 0.27
+            + noise * 4.8));
+        float fine_vein = abs(sin(world_position.x * 0.91
+            - world_position.z * 0.73 + noise * 8.0));
+        float veins = smoothstep(0.82, 0.97,
+            max(broad_vein, fine_vein * 0.88));
+        vec3 cool_stone = u_albedo * mix(0.70, 1.08, noise);
+        vec3 pale_vein = vec3(0.78, 0.91, 0.98);
+        return mix(cool_stone, pale_vein, veins * 0.72);
+    }
+    if (u_material_kind == shallow_water_material
+        || u_material_kind == deep_water_material) {
+        float ripple = 0.5 + 0.5 * sin((texture_coordinates.x
+            + texture_coordinates.y) * 24.0 + u_time_seconds * 1.3
+            + noise * 4.0);
+        float depth_tint = u_material_kind == deep_water_material ? 0.42 : 0.78;
+        return u_albedo * mix(depth_tint, 1.12, ripple);
+    }
+    if (u_material_kind == soil_material) {
+        float mineral = smoothstep(0.72, 0.90, noise);
+        return mix(u_albedo * mix(0.45, 0.92, noise),
+            vec3(0.48, 0.58, 0.42), mineral * 0.55);
+    }
+    if (u_material_kind == aether_material) {
+        float pulse = 0.72 + 0.28 * sin(
+            u_time_seconds * 1.6 + world_position.y * 1.3);
+        return u_albedo * mix(0.62, 1.24, noise) * pulse;
+    }
+    if (u_material_kind == mist_material) {
+        float drift = 0.72 + 0.28 * sin(world_position.x * 0.35
+            + world_position.z * 0.28 + u_time_seconds * 0.22);
+        return u_albedo * drift;
+    }
     vec2 grain_coordinates = texture_coordinates * vec2(u_texture_scale, 1.0);
-    return u_albedo * texture(u_wood_texture, grain_coordinates).rgb;
+    vec3 grain = texture(u_wood_texture, grain_coordinates).rgb;
+    if (u_material_kind == bark_material) {
+        grain *= 0.72 + 0.28 * sin(world_position.y * 2.5 + noise * 3.0);
+    }
+    return u_albedo * grain;
 }
 
 void main()
@@ -73,7 +141,11 @@ void main()
     for (int index = 0; index < u_point_light_count; ++index) {
         PointLight light = u_point_lights[index];
         vec3 to_light = light.position - world_position;
-        float distance_metres = length(to_light);
+        float distance_squared = dot(to_light, to_light);
+        if (distance_squared >= light.range_metres * light.range_metres) {
+            continue;
+        }
+        float distance_metres = sqrt(distance_squared);
         vec3 light_direction = distance_metres > minimum_weight_sum
             ? to_light / distance_metres : normal;
         float diffuse_amount = max(dot(normal, light_direction), 0.0);

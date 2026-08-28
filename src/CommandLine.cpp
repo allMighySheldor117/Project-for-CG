@@ -21,6 +21,20 @@ namespace {
     return value;
 }
 
+[[nodiscard]] std::uint32_t parse_profile_seconds(const std::string_view text)
+{
+    std::uint32_t value{};
+    const char* const begin{text.data()};
+    const char* const end{begin + text.size()};
+    const auto result = std::from_chars(begin, end, value, 10);
+    if (text.empty() || result.ec != std::errc{} || result.ptr != end
+        || value == 0U || value > 3'600U) {
+        throw CommandLineError{
+            "--profile-seconds requires an integer in the range 1..3600."};
+    }
+    return value;
+}
+
 }  // namespace
 
 CommandLineOptions parse_command_line(const std::vector<std::string_view>& arguments)
@@ -46,7 +60,29 @@ CommandLineOptions parse_command_line(const std::vector<std::string_view>& argum
             options.requested_seed = parse_seed(arguments[index]);
             continue;
         }
+        if (argument == "--profile-seconds") {
+            if (options.profile_seconds.has_value()) {
+                throw CommandLineError{"--profile-seconds may be specified only once."};
+            }
+            if (index + 1U >= arguments.size()) {
+                throw CommandLineError{"--profile-seconds requires a value."};
+            }
+            ++index;
+            options.profile_seconds = parse_profile_seconds(arguments[index]);
+            continue;
+        }
+        if (argument == "--profile-no-vsync") {
+            if (options.profile_no_vsync) {
+                throw CommandLineError{"--profile-no-vsync may be specified only once."};
+            }
+            options.profile_no_vsync = true;
+            continue;
+        }
         throw CommandLineError{"Unknown argument: " + std::string{argument}};
+    }
+    if (options.profile_no_vsync && !options.profile_seconds.has_value()) {
+        throw CommandLineError{
+            "--profile-no-vsync requires --profile-seconds."};
     }
     return options;
 }

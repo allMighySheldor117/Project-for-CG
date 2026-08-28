@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "GeometryMath.hpp"
+#include "crystalbound/AuthoredChamber.hpp"
 #include "crystalbound/DeterministicRandom.hpp"
 
 namespace crystalbound {
@@ -19,13 +20,11 @@ namespace {
 
 using namespace geometry_detail;
 
-constexpr std::int32_t chamber_radius_millimetres{1'750};
-constexpr std::int32_t chamber_radial_variation_millimetres{120};
+constexpr std::int32_t chamber_radial_variation_millimetres{250};
 constexpr std::int32_t tunnel_radius_millimetres{1'350};
 constexpr std::uint32_t chamber_side_count{16U};
 constexpr std::uint32_t tunnel_side_count{8U};
 constexpr std::int32_t tunnel_radial_variation_millimetres{80};
-constexpr std::int32_t junction_depth_millimetres{500};
 constexpr std::int32_t bridge_width_millimetres{1'900};
 constexpr std::int32_t bridge_rail_height_millimetres{850};
 constexpr double millimetres_per_metre{1'000.0};
@@ -35,6 +34,7 @@ constexpr std::uint64_t chamber_floor_domain{0x2000'0000'0000'0000ULL};
 constexpr std::uint64_t tunnel_piece_domain{0x3000'0000'0000'0000ULL};
 constexpr std::uint64_t junction_piece_domain{0x4000'0000'0000'0000ULL};
 constexpr std::uint64_t bridge_piece_domain{0x5000'0000'0000'0000ULL};
+constexpr std::uint64_t natural_formation_domain{0x6000'0000'0000'0000ULL};
 
 struct IntegerDirection2 {
     std::int32_t x{};
@@ -159,26 +159,6 @@ constexpr std::array<IntegerDirection2, chamber_side_count> chamber_directions{{
     return best_index;
 }
 
-[[nodiscard]] bool opening_contains_side(
-    const std::vector<PortalContract>& portals,
-    const NodeId chamber_id,
-    const std::uint32_t side) noexcept
-{
-    for (const PortalContract& portal : portals) {
-        if (portal.chamber_id != chamber_id) {
-            continue;
-        }
-        const std::uint32_t previous{
-            (portal.opening_side_index + chamber_side_count - 1U) % chamber_side_count};
-        const std::uint32_t next{
-            (portal.opening_side_index + 1U) % chamber_side_count};
-        if (side == previous || side == portal.opening_side_index || side == next) {
-            return true;
-        }
-    }
-    return false;
-}
-
 [[nodiscard]] Vertex vertex_for(
     const GeometryVector3& position,
     const GeometryVector3& normal,
@@ -234,47 +214,68 @@ void append_quad_face(
     builder.append_triangle(first_index, third_index, fourth_index);
 }
 
-[[nodiscard]] GeometryVector3 chamber_ring_position(
-    const ChamberGeometryContract& chamber,
-    const std::uint32_t side,
-    const double height_metres,
-    const double radius_scale = 1.0)
-{
-    const IntegerDirection2 direction{chamber_directions[side % chamber_side_count]};
-    const std::int32_t radius_millimetres{
-        chamber.base_radius_millimetres
-        + chamber.radial_offsets_millimetres[side % chamber.side_count]};
-    const double radius{
-        static_cast<double>(radius_millimetres) / millimetres_per_metre * radius_scale};
-    return {
-        static_cast<double>(chamber.center_millimetres.x_millimetres)
-                / millimetres_per_metre
-            + static_cast<double>(direction.x) / 10'000.0 * radius,
-        height_metres,
-        static_cast<double>(chamber.center_millimetres.z_millimetres)
-                / millimetres_per_metre
-            + static_cast<double>(direction.z) / 10'000.0 * radius,
-    };
-}
-
-[[nodiscard]] MeshData build_chamber_floor(const ChamberGeometryContract& chamber)
+[[nodiscard]] MeshData build_chamber_floor(
+    const CompiledChamberTemplate& chamber)
 {
     MeshBuilder builder;
-    const double floor_y{
-        static_cast<double>(chamber.center_millimetres.y_millimetres)
-        / millimetres_per_metre};
-    const GeometryVector3 center{
-        static_cast<double>(chamber.center_millimetres.x_millimetres)
-            / millimetres_per_metre,
-        floor_y,
-        static_cast<double>(chamber.center_millimetres.z_millimetres)
-            / millimetres_per_metre,
-    };
-    for (std::uint32_t side{}; side < chamber.side_count; ++side) {
-        const GeometryVector3 current{chamber_ring_position(chamber, side, floor_y)};
-        const GeometryVector3 next{
-            chamber_ring_position(chamber, (side + 1U) % chamber.side_count, floor_y)};
-        append_triangle_face(builder, center, next, current, {0.0, 1.0, 0.0});
+    for (const CompiledTemplateFloorPatch& patch : chamber.floor_patches) {
+        if (!patch.walkable || patch.world_polygon_millimetres.size() < 3U) {
+            continue;
+        }
+        GeometryVector3 center{};
+        for (const TemplatePoint2 point : patch.world_polygon_millimetres) {
+            center.x += point.x_millimetres / millimetres_per_metre;
+            center.z += point.z_millimetres / millimetres_per_metre;
+        }
+        center.x /= patch.world_polygon_millimetres.size();
+        center.y = patch.support_height_millimetres / millimetres_per_metre;
+        center.z /= patch.world_polygon_millimetres.size();
+        for (std::size_t index{};
+             index < patch.world_polygon_millimetres.size(); ++index) {
+            const TemplatePoint2 current_point{
+                patch.world_polygon_millimetres[index]};
+            const TemplatePoint2 next_point{patch.world_polygon_millimetres[
+                (index + 1U) % patch.world_polygon_millimetres.size()]};
+            const GeometryVector3 current{
+                current_point.x_millimetres / millimetres_per_metre, center.y,
+                current_point.z_millimetres / millimetres_per_metre};
+            const GeometryVector3 next{
+                next_point.x_millimetres / millimetres_per_metre, center.y,
+                next_point.z_millimetres / millimetres_per_metre};
+            append_triangle_face(
+                builder, center, next, current, {0.0, 1.0, 0.0});
+        }
+    }
+    return builder.finish();
+}
+
+[[nodiscard]] MeshData build_chamber_hazards(
+    const CompiledChamberTemplate& chamber)
+{
+    MeshBuilder builder;
+    for (const CompiledTemplateHazardVolume& hazard : chamber.hazards) {
+        GeometryVector3 center{};
+        for (const TemplatePoint2 point : hazard.world_polygon_millimetres) {
+            center.x += point.x_millimetres / millimetres_per_metre;
+            center.z += point.z_millimetres / millimetres_per_metre;
+        }
+        center.x /= hazard.world_polygon_millimetres.size();
+        center.y = (hazard.maximum_y_millimetres - 20)
+            / millimetres_per_metre;
+        center.z /= hazard.world_polygon_millimetres.size();
+        for (std::size_t index{};
+             index < hazard.world_polygon_millimetres.size(); ++index) {
+            const TemplatePoint2 current_point{
+                hazard.world_polygon_millimetres[index]};
+            const TemplatePoint2 next_point{hazard.world_polygon_millimetres[
+                (index + 1U) % hazard.world_polygon_millimetres.size()]};
+            append_triangle_face(builder, center,
+                {next_point.x_millimetres / millimetres_per_metre, center.y,
+                    next_point.z_millimetres / millimetres_per_metre},
+                {current_point.x_millimetres / millimetres_per_metre, center.y,
+                    current_point.z_millimetres / millimetres_per_metre},
+                {0.0, 1.0, 0.0});
+        }
     }
     return builder.finish();
 }
@@ -284,106 +285,114 @@ void append_quad_face(
     const std::vector<PortalContract>& portals)
 {
     MeshBuilder builder;
-    const double floor_y{
-        static_cast<double>(chamber.center_millimetres.y_millimetres)
-        / millimetres_per_metre};
-    const double wall_top{
-        floor_y + static_cast<double>(chamber.wall_height_millimetres) / millimetres_per_metre
-            * 0.72};
     const GeometryVector3 center{
         static_cast<double>(chamber.center_millimetres.x_millimetres)
             / millimetres_per_metre,
-        floor_y + 1.5,
+        static_cast<double>(chamber.center_millimetres.y_millimetres)
+                / millimetres_per_metre
+            + 2.0,
         static_cast<double>(chamber.center_millimetres.z_millimetres)
             / millimetres_per_metre,
     };
-    const GeometryVector3 apex{
-        center.x,
-        floor_y + static_cast<double>(chamber.wall_height_millimetres)
-            / millimetres_per_metre,
-        center.z,
-    };
-    for (std::uint32_t side{}; side < chamber.side_count; ++side) {
-        const std::uint32_t next_side{(side + 1U) % chamber.side_count};
-        const GeometryVector3 bottom_first{chamber_ring_position(chamber, side, floor_y)};
-        const GeometryVector3 bottom_second{
-            chamber_ring_position(chamber, next_side, floor_y)};
-        const GeometryVector3 top_first{
-            chamber_ring_position(chamber, side, wall_top, 0.78)};
-        const GeometryVector3 top_second{
-            chamber_ring_position(chamber, next_side, wall_top, 0.78)};
-        if (!opening_contains_side(portals, chamber.node_id, side)) {
-            const GeometryVector3 wall_midpoint{multiply(
-                add(add(bottom_first, bottom_second), add(top_first, top_second)), 0.25)};
-            append_quad_face(
-                builder,
-                bottom_first,
-                bottom_second,
-                top_second,
-                top_first,
-                subtract(center, wall_midpoint));
-        }
-        const GeometryVector3 ceiling_midpoint{
-            multiply(add(add(top_first, top_second), apex), 1.0 / 3.0)};
+    for (const ChamberStructuralTriangle& triangle :
+        chamber_structure_triangles(chamber, portals)) {
+        const GeometryVector3 midpoint{multiply(
+            add(add(triangle.first, triangle.second), triangle.third), 1.0 / 3.0)};
         append_triangle_face(
             builder,
-            top_first,
-            top_second,
-            apex,
-            subtract(center, ceiling_midpoint));
+            triangle.first,
+            triangle.second,
+            triangle.third,
+            subtract(center, midpoint));
     }
     return builder.finish();
 }
 
-[[nodiscard]] MeshData build_perturbed_tunnel(const RouteGeometryContract& route)
+[[nodiscard]] MeshData build_general_chamber_formations(
+    const ChamberGeometryContract& chamber,
+    const Seed effective_seed)
 {
+    MeshBuilder builder;
+    SplitMix64 random{make_substream(effective_seed.value,
+        random_domain::decoration,
+        natural_formation_domain ^ chamber.node_id.value)};
+    const GeometryVector3 center{
+        chamber.center_millimetres.x_millimetres / millimetres_per_metre,
+        chamber.center_millimetres.y_millimetres / millimetres_per_metre,
+        chamber.center_millimetres.z_millimetres / millimetres_per_metre};
+    constexpr std::uint32_t spike_sides{5U};
+    for (std::uint32_t ordinal{}; ordinal < 8U; ++ordinal) {
+        const std::uint32_t chamber_side{(ordinal * 2U + chamber.node_id.value) % chamber.side_count};
+        const GeometryVector3 wall{chamber_ring_position(chamber, 0U, chamber_side)};
+        const GeometryVector3 base_center{add(center, multiply(subtract(wall, center), 0.82))};
+        const double radius{0.24 + static_cast<double>(random.bounded(210U)) / 1'000.0};
+        const double height{0.70 + static_cast<double>(random.bounded(801U)) / 1'000.0};
+        const GeometryVector3 tip{base_center.x, base_center.y + height, base_center.z};
+        for (std::uint32_t side{}; side < spike_sides; ++side) {
+            const double first_angle{2.0 * 3.14159265358979323846 * side / spike_sides};
+            const double second_angle{
+                2.0 * 3.14159265358979323846 * (side + 1U) / spike_sides};
+            const GeometryVector3 first{base_center.x + std::cos(first_angle) * radius,
+                base_center.y, base_center.z + std::sin(first_angle) * radius};
+            const GeometryVector3 second{base_center.x + std::cos(second_angle) * radius,
+                base_center.y, base_center.z + std::sin(second_angle) * radius};
+            const GeometryVector3 midpoint{multiply(add(add(first, second), tip), 1.0 / 3.0)};
+            append_triangle_face(builder, first, second, tip,
+                subtract(midpoint, base_center));
+        }
+    }
+    return builder.finish();
+}
+
+[[nodiscard]] MeshData build_horseshoe_tunnel(const RouteGeometryContract& route)
+{
+    if (route.bridge || route.tunnel_clear_width_millimetres != 3'200
+        || route.tunnel_side_height_millimetres != 2'200
+        || route.tunnel_crown_height_millimetres != 4'000) {
+        throw GeometryError{"Horseshoe tunnel received an invalid route profile."};
+    }
     const std::vector<SplineSample> samples{
         sample_centripetal_catmull_rom(route.spline)};
     const std::vector<TransportFrame> frames{build_parallel_transport_frames(samples)};
-    const std::size_t vertices_per_ring{
-        static_cast<std::size_t>(route.spline.ring_side_count) + 1U};
-    if (frames.size() > geometry_budgets.maximum_static_vertices / vertices_per_ring) {
-        throw GeometryError{"Tunnel sweep exceeds the static vertex budget."};
+    struct ProfilePoint {
+        std::int32_t side_millimetres{};
+        std::int32_t up_millimetres{};
+    };
+    constexpr std::array<ProfilePoint, 11> profile{{
+        {-1'600, -1'350}, {1'600, -1'350}, {1'600, 850},
+        {1'478, 1'539}, {1'131, 2'123}, {612, 2'510}, {0, 2'650},
+        {-612, 2'510}, {-1'131, 2'123}, {-1'478, 1'539}, {-1'600, 850},
+    }};
+    if (frames.size() > geometry_budgets.maximum_static_vertices
+            / (profile.size() * 4U)) {
+        throw GeometryError{"Horseshoe tunnel exceeds the static vertex budget."};
     }
-
+    const auto position = [](const TransportFrame& frame,
+                              const ProfilePoint point) {
+        return add(frame.position_metres,
+            add(multiply(frame.binormal,
+                    point.side_millimetres / millimetres_per_metre),
+                multiply(frame.normal,
+                    point.up_millimetres / millimetres_per_metre)));
+    };
     MeshBuilder builder;
-    constexpr double pi{3.14159265358979323846};
-    for (std::size_t ring{}; ring < frames.size(); ++ring) {
-        const TransportFrame& frame{frames[ring]};
-        for (std::uint32_t side{}; side <= route.spline.ring_side_count; ++side) {
-            const std::uint32_t wrapped_side{side % route.spline.ring_side_count};
-            const double radial_millimetres{
-                static_cast<double>(route.spline.radius_millimetres
-                    + route.ring_offsets_millimetres[wrapped_side])};
-            const double ring_coordinate{
-                static_cast<double>(side) / route.spline.ring_side_count};
-            const double angle{wrapped_side == 0U && side != 0U
-                    ? 0.0
-                    : ring_coordinate * 2.0 * pi};
-            const GeometryVector3 radial{add(
-                multiply(frame.normal, std::cos(angle)),
-                multiply(frame.binormal, std::sin(angle)))};
-            const GeometryVector3 position{add(
-                frame.position_metres,
-                multiply(radial, radial_millimetres / millimetres_per_metre))};
-            const GeometryVector3 normal{multiply(radial, -1.0)};
-            static_cast<void>(builder.append_vertex(vertex_for(
-                position,
-                normal,
-                static_cast<float>(samples[ring].distance_metres),
-                static_cast<float>(ring_coordinate))));
-        }
-    }
     for (std::size_t ring{}; ring + 1U < frames.size(); ++ring) {
-        const auto first_ring{static_cast<std::uint32_t>(ring * vertices_per_ring)};
-        const auto second_ring{static_cast<std::uint32_t>((ring + 1U) * vertices_per_ring)};
-        for (std::uint32_t side{}; side < route.spline.ring_side_count; ++side) {
-            const std::uint32_t first{first_ring + side};
-            const std::uint32_t next{first + 1U};
-            const std::uint32_t second{second_ring + side};
-            const std::uint32_t second_next{second + 1U};
-            builder.append_triangle(first, second, second_next);
-            builder.append_triangle(first, second_next, next);
+        const GeometryVector3 interior{add(
+            multiply(add(frames[ring].position_metres,
+                         frames[ring + 1U].position_metres),
+                0.5),
+            multiply(add(frames[ring].normal, frames[ring + 1U].normal),
+                0.15))};
+        for (std::size_t side{}; side < profile.size(); ++side) {
+            const std::size_t next{(side + 1U) % profile.size()};
+            const GeometryVector3 first{position(frames[ring], profile[side])};
+            const GeometryVector3 second{position(frames[ring + 1U], profile[side])};
+            const GeometryVector3 third{position(frames[ring + 1U], profile[next])};
+            const GeometryVector3 fourth{position(frames[ring], profile[next])};
+            const GeometryVector3 midpoint{multiply(
+                add(add(first, second), add(third, fourth)), 0.25)};
+            append_quad_face(builder, first, second, third, fourth,
+                subtract(interior, midpoint));
         }
     }
     return builder.finish();
@@ -499,7 +508,9 @@ void append_piece(
     const ScenePieceKind kind,
     const std::uint64_t stable_id,
     MeshData mesh,
-    const std::array<float, 3>& albedo)
+    const std::array<float, 3>& albedo,
+    const std::optional<MaterialKind> material_override = std::nullopt,
+    const std::optional<NodeId> owner_chamber_id = std::nullopt)
 {
     validate_procedural_mesh(mesh);
     const AxisAlignedBounds bounds{mesh_bounds(mesh)};
@@ -512,24 +523,150 @@ void append_piece(
     }
     scene.static_vertex_count += static_cast<std::uint32_t>(mesh.vertices.size());
     ++scene.opaque_draw_call_count;
-    const MaterialKind material{
-        kind == ScenePieceKind::bridge ? MaterialKind::wood : MaterialKind::rock};
-    scene.mesh_pieces.push_back({kind, stable_id, std::move(mesh), bounds, material, albedo});
+    const MaterialKind material{material_override.value_or(
+        kind == ScenePieceKind::bridge ? MaterialKind::wood : MaterialKind::rock)};
+    scene.mesh_pieces.push_back(
+        {kind, stable_id, std::move(mesh), bounds, material, albedo,
+            owner_chamber_id});
+}
+
+[[nodiscard]] MaterialKind chamber_material(
+    const ChamberTemplateRole role,
+    const bool shell)
+{
+    switch (role) {
+    case ChamberTemplateRole::fire:
+        return MaterialKind::basalt_lava_crust;
+    case ChamberTemplateRole::water:
+        return shell ? MaterialKind::water_marble : MaterialKind::wet_rock;
+    case ChamberTemplateRole::earth:
+        return MaterialKind::soil_mineral;
+    case ChamberTemplateRole::air:
+        return shell ? MaterialKind::rock : MaterialKind::wood_bark;
+    case ChamberTemplateRole::aether:
+        return MaterialKind::aether_crystal;
+    case ChamberTemplateRole::start:
+    case ChamberTemplateRole::exit:
+    case ChamberTemplateRole::neutral:
+        return MaterialKind::rock;
+    }
+    throw GeometryError{"Unknown chamber material role."};
 }
 
 [[nodiscard]] ChamberGeometryContract make_chamber_contract(
     const ChamberNode& node,
     const Seed effective_seed)
 {
+    struct DimensionBand {
+        std::int32_t minimum_radius{};
+        std::int32_t maximum_radius{};
+        std::int32_t minimum_height{};
+        std::int32_t maximum_height{};
+    };
+    const auto dimensions_for = [](const ChamberNode& chamber) {
+        if (chamber.role == ChamberRole::start) {
+            return DimensionBand{9'000, 10'000, 5'600, 6'400};
+        }
+        if (chamber.role == ChamberRole::exit) {
+            return DimensionBand{9'500, 10'500, 5'900, 6'700};
+        }
+        if (chamber.role != ChamberRole::elemental || !chamber.element.has_value()) {
+            return DimensionBand{8'800, 9'800, 5'500, 6'300};
+        }
+        switch (*chamber.element) {
+            case Element::fire:
+                return DimensionBand{32'000, 33'000, 23'000, 24'000};
+            case Element::water:
+                return DimensionBand{9'300, 10'300, 5'600, 6'500};
+            case Element::earth:
+                return DimensionBand{24'000, 25'000, 13'000, 14'000};
+            case Element::air:
+                return DimensionBand{25'000, 26'000, 22'000, 23'000};
+            case Element::aether:
+                return DimensionBand{8'900, 9'900, 6'000, 7'000};
+        }
+        throw GeometryError{"Unknown elemental chamber dimension contract."};
+    };
+    const auto identity_for = [](const ChamberNode& chamber) {
+        if (chamber.role != ChamberRole::elemental || !chamber.element.has_value()) {
+            return ChamberStructuralIdentity{};
+        }
+        switch (*chamber.element) {
+            case Element::fire:
+                return ChamberStructuralIdentity{
+                    ChamberFloorMorphology::fractured_terraces,
+                    ChamberShellSilhouette::jagged,
+                    ChamberEntranceFraming::fractured,
+                    ChamberLandmarkAnchor::lava_terrace,
+                    1U};
+            case Element::water:
+                return ChamberStructuralIdentity{
+                    ChamberFloorMorphology::eroded_banks,
+                    ChamberShellSilhouette::flowing,
+                    ChamberEntranceFraming::rounded,
+                    ChamberLandmarkAnchor::mist_basin,
+                    2U};
+            case Element::earth:
+                return ChamberStructuralIdentity{
+                    ChamberFloorMorphology::grounded_shelves,
+                    ChamberShellSilhouette::massive,
+                    ChamberEntranceFraming::pillars,
+                    ChamberLandmarkAnchor::stone_columns,
+                    3U};
+            case Element::air:
+                return ChamberStructuralIdentity{
+                    ChamberFloorMorphology::open_spans,
+                    ChamberShellSilhouette::soaring,
+                    ChamberEntranceFraming::timbered,
+                    ChamberLandmarkAnchor::suspended_bridge,
+                    4U};
+            case Element::aether:
+                return ChamberStructuralIdentity{
+                    ChamberFloorMorphology::asymmetric_dais,
+                    ChamberShellSilhouette::vaulted,
+                    ChamberEntranceFraming::arched,
+                    ChamberLandmarkAnchor::crystal_arch,
+                    5U};
+        }
+        throw GeometryError{"Unknown elemental chamber identity contract."};
+    };
+    const auto ring_scales_for = [](const ChamberStructuralIdentity& identity) {
+        switch (identity.shell) {
+            case ChamberShellSilhouette::jagged:
+                return std::array<std::int32_t, 5U>{1'000, 1'020, 870, 600, 300};
+            case ChamberShellSilhouette::flowing:
+                return std::array<std::int32_t, 5U>{1'000, 980, 920, 680, 360};
+            case ChamberShellSilhouette::massive:
+                return std::array<std::int32_t, 5U>{1'000, 1'040, 960, 620, 330};
+            case ChamberShellSilhouette::soaring:
+                return std::array<std::int32_t, 5U>{1'000, 960, 800, 520, 260};
+            case ChamberShellSilhouette::vaulted:
+                return std::array<std::int32_t, 5U>{1'000, 1'010, 840, 560, 280};
+            case ChamberShellSilhouette::balanced:
+                return std::array<std::int32_t, 5U>{1'000, 1'000, 880, 620, 320};
+        }
+        throw GeometryError{"Unknown chamber shell silhouette."};
+    };
     SplitMix64 random{make_substream(
         effective_seed.value, random_domain::geometry, node.id.value)};
+    const DimensionBand band{dimensions_for(node)};
+    const ChamberStructuralIdentity identity{identity_for(node)};
+    const std::int32_t base_radius{band.minimum_radius
+        + static_cast<std::int32_t>(random.bounded(
+            static_cast<std::uint64_t>(band.maximum_radius - band.minimum_radius + 1)))};
+    const std::int32_t height{band.minimum_height
+        + static_cast<std::int32_t>(random.bounded(
+            static_cast<std::uint64_t>(band.maximum_height - band.minimum_height + 1)))};
     ChamberGeometryContract chamber{
         node.id,
         {node.anchor.x_millimetres, node.anchor.elevation_millimetres,
          node.anchor.z_millimetres},
-        chamber_radius_millimetres,
-        3'800 + static_cast<std::int32_t>(random.bounded(601U)),
+        base_radius,
+        height,
         chamber_side_count,
+        {},
+        0,
+        identity,
         {},
     };
     chamber.radial_offsets_millimetres.reserve(chamber.side_count);
@@ -537,7 +674,52 @@ void append_piece(
         chamber.radial_offsets_millimetres.push_back(
             signed_sample(random, chamber_radial_variation_millimetres));
     }
+    chamber.radial_offsets_millimetres[
+        static_cast<std::size_t>(random.bounded(chamber.side_count))]
+        = -chamber_radial_variation_millimetres;
+    chamber.minimum_safe_ring_radius_millimetres = base_radius
+        + *std::min_element(chamber.radial_offsets_millimetres.begin(),
+            chamber.radial_offsets_millimetres.end());
+
+    const std::array<std::int32_t, 5U> ring_scales{ring_scales_for(identity)};
+    const std::array<std::int32_t, 5U> ring_heights{
+        0,
+        height * 28 / 100,
+        height * 62 / 100,
+        height * 84 / 100,
+        height,
+    };
+    chamber.rings.reserve(ring_scales.size());
+    for (std::size_t ring{}; ring < ring_scales.size(); ++ring) {
+        ChamberRingContract contract;
+        contract.height_millimetres = ring_heights[ring];
+        contract.radii_millimetres.reserve(chamber.side_count);
+        for (std::uint32_t side{}; side < chamber.side_count; ++side) {
+            const std::int32_t floor_radius{
+                base_radius + chamber.radial_offsets_millimetres[side]};
+            const std::int32_t profile_variation{ring == 0U ? 0
+                : signed_sample(random, 120 + static_cast<std::int32_t>(ring) * 25)};
+            contract.radii_millimetres.push_back(std::max(
+                1'500,
+                floor_radius * ring_scales[ring] / 1'000 + profile_variation));
+        }
+        chamber.rings.push_back(std::move(contract));
+    }
     return chamber;
+}
+
+[[nodiscard]] std::int32_t maximum_chamber_radius(
+    const ChamberGeometryContract& chamber)
+{
+    std::int32_t maximum{};
+    for (const ChamberRingContract& ring : chamber.rings) {
+        if (!ring.radii_millimetres.empty()) {
+            maximum = std::max(maximum,
+                *std::max_element(ring.radii_millimetres.begin(),
+                    ring.radii_millimetres.end()));
+        }
+    }
+    return maximum;
 }
 
 void validate_chamber_spacing(const std::vector<ChamberGeometryContract>& chambers)
@@ -551,9 +733,8 @@ void validate_chamber_spacing(const std::vector<ChamberGeometryContract>& chambe
                 static_cast<std::int64_t>(chambers[right].center_millimetres.z_millimetres)
                 - chambers[left].center_millimetres.z_millimetres};
             const std::int64_t required{
-                chambers[left].base_radius_millimetres
-                + chambers[right].base_radius_millimetres
-                + 2 * chamber_radial_variation_millimetres
+                maximum_chamber_radius(chambers[left])
+                + maximum_chamber_radius(chambers[right])
                 + geometry_spatial_contract.chamber_safety_separation_millimetres};
             if (dx * dx + dz * dz < required * required) {
                 throw GeometryError{"Chamber bounds violate the locked safety separation."};
@@ -562,48 +743,163 @@ void validate_chamber_spacing(const std::vector<ChamberGeometryContract>& chambe
     }
 }
 
-[[nodiscard]] Edge select_bridge_route(
+[[nodiscard]] bool route_has_alternate_path(
+    const TopologyData& topology,
+    const Edge removed)
+{
+    std::vector<NodeId> pending{removed.first};
+    std::vector<NodeId> visited{removed.first};
+    for (std::size_t index{}; index < pending.size(); ++index) {
+        const NodeId current{pending[index]};
+        for (const Edge edge : topology.edges) {
+            if (edge == removed || (edge.first != current && edge.second != current)) {
+                continue;
+            }
+            const NodeId next{edge.first == current ? edge.second : edge.first};
+            if (next == removed.second) {
+                return true;
+            }
+            if (std::find(visited.begin(), visited.end(), next) == visited.end()) {
+                visited.push_back(next);
+                pending.push_back(next);
+            }
+        }
+    }
+    return false;
+}
+
+[[nodiscard]] bool edges_share_endpoint(
+    const Edge left,
+    const Edge right) noexcept
+{
+    return left.first == right.first || left.first == right.second
+        || left.second == right.first || left.second == right.second;
+}
+
+[[nodiscard]] std::vector<Edge> select_bridge_routes(
     const TopologyData& topology,
     const Seed effective_seed)
 {
     if (topology.routes.empty()) {
         throw GeometryError{"A cave requires at least one route for its bridge."};
     }
-    Edge selected{topology.routes.front().edge};
-    std::uint64_t selected_score{std::numeric_limits<std::uint64_t>::max()};
+    std::vector<Edge> cycle_edges;
     for (const RouteDescriptor& route : topology.routes) {
+        if (route_has_alternate_path(topology, route.edge)) {
+            cycle_edges.push_back(route.edge);
+        }
+    }
+    if (cycle_edges.empty()) {
+        throw GeometryError{"A cave bridge requires an alternate-route cycle."};
+    }
+    Edge selected{cycle_edges.front()};
+    std::uint64_t selected_score{std::numeric_limits<std::uint64_t>::max()};
+    for (const Edge edge : cycle_edges) {
         SplitMix64 random{make_substream(
             effective_seed.value,
             random_domain::geometry,
-            stable_edge_id(route.edge) ^ bridge_piece_domain)};
+            stable_edge_id(edge) ^ bridge_piece_domain)};
         const std::uint64_t score{random.next()};
         if (score < selected_score
-            || (score == selected_score && route.edge < selected)) {
-            selected = route.edge;
+            || (score == selected_score && edge < selected)) {
+            selected = edge;
             selected_score = score;
         }
     }
-    return selected;
+    std::vector<Edge> bridges{selected};
+    SplitMix64 decision{make_substream(effective_seed.value,
+        second_bridge_decision_domain, stable_edge_id(selected))};
+    if (decision.bounded(4U) != 0U || topology.edges.size() < 6U) {
+        return bridges;
+    }
+    std::optional<Edge> second;
+    std::uint64_t second_score{std::numeric_limits<std::uint64_t>::max()};
+    for (const Edge candidate : cycle_edges) {
+        if (candidate == selected || edges_share_endpoint(candidate, selected)) {
+            continue;
+        }
+        const std::uint64_t key{stable_edge_id(candidate)
+            ^ rotate_left_64(stable_edge_id(selected))};
+        SplitMix64 score_random{make_substream(
+            effective_seed.value, second_bridge_score_domain, key)};
+        const std::uint64_t score{score_random.next()};
+        if (!second.has_value() || score < second_score
+            || (score == second_score && candidate < *second)) {
+            second = candidate;
+            second_score = score;
+        }
+    }
+    if (second.has_value()) {
+        bridges.push_back(*second);
+        std::sort(bridges.begin(), bridges.end());
+    }
+    return bridges;
 }
 
 [[nodiscard]] PortalContract make_portal(
-    const ChamberNode& chamber,
-    const ChamberNode& other,
+    const ChamberGeometryContract& chamber,
+    const CompiledChamberTemplate& compiled,
+    const ChamberNode&,
     const Edge edge)
 {
-    const std::int32_t dx{other.anchor.x_millimetres - chamber.anchor.x_millimetres};
-    const std::int32_t dz{other.anchor.z_millimetres - chamber.anchor.z_millimetres};
-    const IntegerDirection2 outward{
-        scaled_horizontal_direction(dx, dz, chamber_radius_millimetres)};
-    const IntegerDirection2 inward{scaled_horizontal_direction(dx, dz, -1'000)};
+    const auto socket{std::find_if(compiled.sockets.begin(),
+        compiled.sockets.end(), [&](const CompiledTemplateSocket& candidate) {
+            return candidate.active && candidate.route == edge;
+        })};
+    if (socket == compiled.sockets.end()) {
+        throw GeometryError{"Route has no canonical active chamber socket."};
+    }
+    const std::uint32_t opening_side{nearest_chamber_side(
+        socket->world_outward_direction_million.x_millimetres,
+        socket->world_outward_direction_million.z_millimetres)};
+    const IntegerDirection2 inward{
+        rounded_ratio(-static_cast<std::int64_t>(
+                          socket->world_outward_direction_million.x_millimetres)
+                * 1'000,
+            1'000'000),
+        rounded_ratio(-static_cast<std::int64_t>(
+                          socket->world_outward_direction_million.z_millimetres)
+                * 1'000,
+            1'000'000)};
+    const IntegerPoint3 center{
+        socket->world_vestibule_outer_millimetres.x_millimetres,
+        chamber.center_millimetres.y_millimetres + tunnel_radius_millimetres
+            + (compiled.role == ChamberTemplateRole::water
+                    ? authored_water_landing_height_millimetres
+                    : compiled.role == ChamberTemplateRole::fire
+                        ? authored_fire_landing_height_millimetres
+                        : 0),
+        socket->world_vestibule_outer_millimetres.z_millimetres};
+    const std::int64_t dx{static_cast<std::int64_t>(
+        center.x_millimetres - chamber.center_millimetres.x_millimetres)};
+    const std::int64_t dz{static_cast<std::int64_t>(
+        center.z_millimetres - chamber.center_millimetres.z_millimetres)};
+    const std::int32_t portal_radius{static_cast<std::int32_t>(integer_square_root(
+        static_cast<std::uint64_t>(dx * dx)
+        + static_cast<std::uint64_t>(dz * dz)))};
+    const std::int32_t usable_core_radius{
+        chamber.minimum_safe_ring_radius_millimetres
+        - movement_envelope.capsule_radius_millimetres
+        - movement_envelope.safety_margin_millimetres};
+    const std::int32_t approach_depth{[&] {
+        if (compiled.role == ChamberTemplateRole::aether
+            || compiled.role == ChamberTemplateRole::exit) {
+            return authored_terminal_junction_depth_millimetres;
+        }
+        if (compiled.role == ChamberTemplateRole::water) {
+            return route_junction_depth_millimetres;
+        }
+        return std::max(route_junction_depth_millimetres,
+            portal_radius - usable_core_radius
+                + route_join_overlap_millimetres);
+    }()};
     return {
-        chamber.id,
+        chamber.node_id,
         edge,
-        {chamber.anchor.x_millimetres + outward.x,
-         chamber.anchor.elevation_millimetres + tunnel_radius_millimetres,
-         chamber.anchor.z_millimetres + outward.z},
+        center,
         {inward.x, 0, inward.z},
-        nearest_chamber_side(dx, dz),
+        opening_side,
+        approach_depth,
     };
 }
 
@@ -625,7 +921,7 @@ void validate_chamber_spacing(const std::vector<ChamberGeometryContract>& chambe
 [[nodiscard]] RouteGeometryContract make_route_contract(
     const RouteDescriptor& descriptor,
     const std::vector<PortalContract>& portals,
-    const Edge bridge_edge,
+    const std::vector<Edge>& bridge_edges,
     const Seed effective_seed)
 {
     const PortalContract& first{portal_for(portals, descriptor.edge.first, descriptor.edge)};
@@ -642,8 +938,7 @@ void validate_chamber_spacing(const std::vector<ChamberGeometryContract>& chambe
     }
     const IntegerDirection2 perpendicular{
         scaled_horizontal_direction(-dz, dx, 1'000)};
-    std::int32_t bend{
-        300 + std::abs(descriptor.lateral_offset_millimetres) / 8};
+    std::int32_t bend{0};
     bend = std::min<std::int32_t>(bend, 900);
     bend = std::min<std::int32_t>(
         bend,
@@ -658,7 +953,9 @@ void validate_chamber_spacing(const std::vector<ChamberGeometryContract>& chambe
         static_cast<std::int64_t>(perpendicular.x) * bend, 1'000)};
     const std::int32_t lateral_z{rounded_ratio(
         static_cast<std::int64_t>(perpendicular.z) * bend, 1'000)};
-    const std::int32_t vertical_bend{};
+    const bool bridge{std::find(bridge_edges.begin(), bridge_edges.end(),
+        descriptor.edge) != bridge_edges.end()};
+    const std::int32_t vertical_bend{bridge ? -500 : 0};
     const IntegerPoint3 first_middle{
         start.x_millimetres + dx / 3 + lateral_x,
         start.y_millimetres + (finish.y_millimetres - start.y_millimetres) / 3
@@ -680,7 +977,12 @@ void validate_chamber_spacing(const std::vector<ChamberGeometryContract>& chambe
          tunnel_side_count,
          SurfaceFacing::inward},
         {},
-        descriptor.edge == bridge_edge,
+        bridge,
+        tunnel_clear_width_millimetres,
+        tunnel_side_height_millimetres,
+        tunnel_crown_height_millimetres,
+        route_junction_depth_millimetres,
+        route_join_overlap_millimetres,
         bridge_width_millimetres,
         bridge_rail_height_millimetres,
     };
@@ -718,8 +1020,7 @@ void validate_route_spatial_separation(
                 continue;
             }
             const double required{
-                static_cast<double>(chamber.base_radius_millimetres
-                    + chamber_radial_variation_millimetres
+                static_cast<double>(maximum_chamber_radius(chamber)
                     + route.spline.radius_millimetres)
                 / millimetres_per_metre};
             const GeometryVector3 center{from_millimetres(chamber.center_millimetres)};
@@ -755,28 +1056,63 @@ void validate_route_spatial_separation(
     }
 }
 
-[[nodiscard]] MeshData build_junction_mesh(const PortalContract& portal)
+[[nodiscard]] MeshData build_junction_mesh(
+    const PortalContract& portal,
+    const RouteGeometryContract& route)
 {
+    const std::int32_t approach_depth{route.bridge
+            ? route.vestibule_length_millimetres
+            : portal.approach_depth_millimetres};
+    const IntegerPoint3 outer{
+        portal.center_millimetres.x_millimetres
+            - rounded_ratio(
+                static_cast<std::int64_t>(portal.inward_direction_millimetres.x_millimetres)
+                    * route.join_overlap_millimetres,
+                1'000),
+        portal.center_millimetres.y_millimetres,
+        portal.center_millimetres.z_millimetres
+            - rounded_ratio(
+                static_cast<std::int64_t>(portal.inward_direction_millimetres.z_millimetres)
+                    * route.join_overlap_millimetres,
+                1'000),
+    };
     const IntegerPoint3 inner{
         portal.center_millimetres.x_millimetres
             + rounded_ratio(
                 static_cast<std::int64_t>(portal.inward_direction_millimetres.x_millimetres)
-                    * junction_depth_millimetres,
+                    * approach_depth,
                 1'000),
         portal.center_millimetres.y_millimetres,
         portal.center_millimetres.z_millimetres
             + rounded_ratio(
                 static_cast<std::int64_t>(portal.inward_direction_millimetres.z_millimetres)
-                    * junction_depth_millimetres,
+                    * approach_depth,
                 1'000),
     };
-    return build_spline_ring_mesh({
-        stable_edge_id(portal.route) ^ portal.chamber_id.value,
-        {portal.center_millimetres, inner},
-        tunnel_radius_millimetres,
-        tunnel_side_count,
-        SurfaceFacing::inward,
-    });
+    if (!route.bridge) {
+        RouteGeometryContract vestibule{route};
+        vestibule.spline = {stable_edge_id(portal.route) ^ portal.chamber_id.value,
+            {outer, inner}, tunnel_radius_millimetres,
+            tunnel_side_count, SurfaceFacing::inward};
+        vestibule.ring_offsets_millimetres.assign(tunnel_side_count, 0);
+        return build_horseshoe_tunnel(vestibule);
+    }
+
+    const GeometryVector3 first{from_millimetres(portal.center_millimetres)};
+    const GeometryVector3 second{from_millimetres(inner)};
+    const GeometryVector3 segment{subtract(first, second)};
+    const double segment_length{length(segment)};
+    const GeometryVector3 tangent{normalized(segment, "Bridge landing tangent")};
+    const GeometryVector3 up{0.0, 1.0, 0.0};
+    const GeometryVector3 side{normalized(cross(tangent, up), "Bridge landing side")};
+    GeometryVector3 center{multiply(add(first, second), 0.5)};
+    center.y -= tunnel_radius_millimetres / millimetres_per_metre + 0.08;
+    MeshBuilder builder;
+    append_oriented_box(builder, center, side, up, tangent,
+        {route.bridge_width_millimetres / millimetres_per_metre / 2.0,
+            0.08, segment_length / 2.0 + route.join_overlap_millimetres
+                / millimetres_per_metre});
+    return builder.finish();
 }
 
 void set_start_camera(
@@ -790,12 +1126,23 @@ void set_start_camera(
     if (start == topology.nodes.end()) {
         throw GeometryError{"Generated cave has no Start chamber."};
     }
-    const auto portal = std::find_if(
-        scene.portals.begin(), scene.portals.end(), [&](const PortalContract& candidate) {
-            return candidate.chamber_id == start->id;
-        });
-    if (portal == scene.portals.end()) {
-        throw GeometryError{"Start chamber has no route portal."};
+    const auto compiled{std::find_if(scene.compiled_chambers.begin(),
+        scene.compiled_chambers.end(), [&](const CompiledChamberTemplate& chamber) {
+            return chamber.chamber_id == start->id;
+        })};
+    if (compiled == scene.compiled_chambers.end()) {
+        throw GeometryError{"Start chamber has no compiled template."};
+    }
+    const CompiledTemplateSocket* active_socket{};
+    for (const CompiledTemplateSocket& socket : compiled->sockets) {
+        if (socket.active && socket.route.has_value()
+            && (active_socket == nullptr
+                || *socket.route < *active_socket->route)) {
+            active_socket = &socket;
+        }
+    }
+    if (active_socket == nullptr) {
+        throw GeometryError{"Start chamber has no canonical active route socket."};
     }
     scene.start_camera_position_metres = {
         static_cast<double>(start->anchor.x_millimetres) / millimetres_per_metre,
@@ -804,7 +1151,11 @@ void set_start_camera(
         static_cast<double>(start->anchor.z_millimetres) / millimetres_per_metre,
     };
     scene.start_camera_forward = normalized(
-        subtract(from_millimetres(portal->center_millimetres),
+        subtract(from_millimetres(
+            {active_socket->world_origin_millimetres.x_millimetres,
+                start->anchor.elevation_millimetres
+                    + movement_envelope.camera_height_millimetres,
+                active_socket->world_origin_millimetres.z_millimetres}),
             scene.start_camera_position_metres),
         "Start camera direction");
 }
@@ -821,6 +1172,16 @@ CaveSceneData build_cave_scene(
     }
 
     CaveSceneData scene;
+    try {
+        scene.template_socket_assignments = assign_template_sockets(topology);
+    } catch (const std::exception& error) {
+        throw GeometryError{std::string{"Template socket assignment failed: "}
+            + error.what()};
+    }
+    scene.compiled_chambers = compile_chamber_templates(
+        topology, scene.template_socket_assignments);
+    scene.template_gameplay_fingerprint = template_gameplay_fingerprint(
+        topology, scene.template_socket_assignments);
     scene.chambers.reserve(topology.nodes.size());
     for (const ChamberNode& node : topology.nodes) {
         scene.chambers.push_back(make_chamber_contract(node, effective_seed));
@@ -831,21 +1192,53 @@ CaveSceneData build_cave_scene(
     for (const RouteDescriptor& route : topology.routes) {
         const ChamberNode& first{node_for(topology, route.edge.first)};
         const ChamberNode& second{node_for(topology, route.edge.second)};
-        scene.portals.push_back(make_portal(first, second, route.edge));
-        scene.portals.push_back(make_portal(second, first, route.edge));
+        const auto first_geometry = std::find_if(
+            scene.chambers.begin(), scene.chambers.end(), [&](const auto& chamber) {
+                return chamber.node_id == first.id;
+            });
+        const auto second_geometry = std::find_if(
+            scene.chambers.begin(), scene.chambers.end(), [&](const auto& chamber) {
+                return chamber.node_id == second.id;
+            });
+        if (first_geometry == scene.chambers.end()
+            || second_geometry == scene.chambers.end()) {
+            throw GeometryError{"Portal construction could not find chamber geometry."};
+        }
+        const auto first_compiled{std::find_if(scene.compiled_chambers.begin(),
+            scene.compiled_chambers.end(), [&](const CompiledChamberTemplate& chamber) {
+                return chamber.chamber_id == first.id;
+            })};
+        const auto second_compiled{std::find_if(scene.compiled_chambers.begin(),
+            scene.compiled_chambers.end(), [&](const CompiledChamberTemplate& chamber) {
+                return chamber.chamber_id == second.id;
+            })};
+        if (first_compiled == scene.compiled_chambers.end()
+            || second_compiled == scene.compiled_chambers.end()) {
+            throw GeometryError{"Portal construction could not find compiled chamber data."};
+        }
+        scene.portals.push_back(make_portal(
+            *first_geometry, *first_compiled, second, route.edge));
+        scene.portals.push_back(make_portal(
+            *second_geometry, *second_compiled, first, route.edge));
     }
 
-    const Edge bridge_edge{select_bridge_route(topology, effective_seed)};
-    scene.bridge_routes.push_back(bridge_edge);
+    scene.bridge_routes.clear();
     scene.routes.reserve(topology.routes.size());
     for (const RouteDescriptor& descriptor : topology.routes) {
         scene.routes.push_back(make_route_contract(
-            descriptor, scene.portals, bridge_edge, effective_seed));
+            descriptor, scene.portals, scene.bridge_routes, effective_seed));
     }
     validate_route_spatial_separation(scene.routes, scene.chambers);
 
     for (const ChamberGeometryContract& chamber : scene.chambers) {
-        MeshData floor{build_chamber_floor(chamber)};
+        const auto compiled{std::find_if(scene.compiled_chambers.begin(),
+            scene.compiled_chambers.end(), [&](const CompiledChamberTemplate& item) {
+                return item.chamber_id == chamber.node_id;
+            })};
+        if (compiled == scene.compiled_chambers.end()) {
+            throw GeometryError{"Chamber is missing its compiled template."};
+        }
+        MeshData floor{build_chamber_floor(*compiled)};
         const AxisAlignedBounds floor_bounds{mesh_bounds(floor)};
         scene.colliders.push_back({
             ColliderKind::chamber_floor,
@@ -857,7 +1250,30 @@ CaveSceneData build_cave_scene(
             ScenePieceKind::chamber_floor,
             chamber_floor_domain ^ chamber.node_id.value,
             std::move(floor),
-            {0.30F, 0.33F, 0.37F});
+            compiled->role == ChamberTemplateRole::fire
+                ? std::array<float, 3>{0.22F, 0.055F, 0.018F}
+                : compiled->role == ChamberTemplateRole::water
+                    ? std::array<float, 3>{0.10F, 0.24F, 0.29F}
+                    : compiled->role == ChamberTemplateRole::earth
+                        ? std::array<float, 3>{0.28F, 0.22F, 0.12F}
+                        : compiled->role == ChamberTemplateRole::air
+                            ? std::array<float, 3>{0.34F, 0.23F, 0.10F}
+                            : compiled->role == ChamberTemplateRole::aether
+                                ? std::array<float, 3>{0.30F, 0.12F, 0.42F}
+                                : std::array<float, 3>{0.30F, 0.33F, 0.37F},
+            chamber_material(compiled->role, false), chamber.node_id);
+
+        if (!compiled->hazards.empty()) {
+            append_piece(scene, ScenePieceKind::chamber_hazard,
+                chamber_floor_domain ^ chamber.node_id.value ^ 0x48415A415244ULL,
+                build_chamber_hazards(*compiled),
+                compiled->role == ChamberTemplateRole::fire
+                    ? std::array<float, 3>{0.95F, 0.16F, 0.02F}
+                    : std::array<float, 3>{0.42F, 0.08F, 0.68F},
+                compiled->role == ChamberTemplateRole::fire
+                    ? MaterialKind::lava : MaterialKind::aether_crystal,
+                chamber.node_id);
+        }
 
         MeshData shell{build_chamber_shell(chamber, scene.portals)};
         const AxisAlignedBounds shell_bounds{mesh_bounds(shell)};
@@ -871,24 +1287,43 @@ CaveSceneData build_cave_scene(
             ScenePieceKind::chamber_shell,
             chamber_shell_domain ^ chamber.node_id.value,
             std::move(shell),
-            {0.36F, 0.39F, 0.44F});
+            compiled->role == ChamberTemplateRole::fire
+                ? std::array<float, 3>{0.18F, 0.045F, 0.018F}
+                : compiled->role == ChamberTemplateRole::water
+                    ? std::array<float, 3>{0.78F, 0.84F, 0.90F}
+                    : compiled->role == ChamberTemplateRole::earth
+                        ? std::array<float, 3>{0.30F, 0.24F, 0.14F}
+                        : compiled->role == ChamberTemplateRole::aether
+                            ? std::array<float, 3>{0.24F, 0.10F, 0.34F}
+                            : std::array<float, 3>{0.36F, 0.39F, 0.44F},
+            chamber_material(compiled->role, true), chamber.node_id);
+
+        append_piece(scene, ScenePieceKind::natural_formation,
+            natural_formation_domain ^ chamber.node_id.value,
+            build_general_chamber_formations(chamber, effective_seed),
+            compiled->role == ChamberTemplateRole::fire
+                ? std::array<float, 3>{0.20F, 0.06F, 0.025F}
+                : compiled->role == ChamberTemplateRole::water
+                    ? std::array<float, 3>{0.11F, 0.21F, 0.23F}
+                    : compiled->role == ChamberTemplateRole::earth
+                        ? std::array<float, 3>{0.27F, 0.22F, 0.13F}
+                        : std::array<float, 3>{0.29F, 0.32F, 0.34F},
+            chamber_material(compiled->role, true), chamber.node_id);
     }
 
     for (const RouteGeometryContract& route : scene.routes) {
-        MeshData tunnel{build_perturbed_tunnel(route)};
-        const AxisAlignedBounds tunnel_bounds{mesh_bounds(tunnel)};
-        scene.colliders.push_back({
-            ColliderKind::tunnel,
-            tunnel_piece_domain ^ stable_edge_id(route.edge),
-            tunnel_bounds,
-        });
-        append_piece(
-            scene,
-            ScenePieceKind::tunnel,
-            tunnel_piece_domain ^ stable_edge_id(route.edge),
-            std::move(tunnel),
-            route.bridge ? std::array<float, 3>{0.29F, 0.31F, 0.35F}
-                         : std::array<float, 3>{0.33F, 0.36F, 0.41F});
+        if (!route.bridge) {
+            MeshData tunnel{build_horseshoe_tunnel(route)};
+            const AxisAlignedBounds tunnel_bounds{mesh_bounds(tunnel)};
+            scene.colliders.push_back({
+                ColliderKind::tunnel,
+                tunnel_piece_domain ^ stable_edge_id(route.edge),
+                tunnel_bounds,
+            });
+            append_piece(scene, ScenePieceKind::tunnel,
+                tunnel_piece_domain ^ stable_edge_id(route.edge),
+                std::move(tunnel), {0.33F, 0.36F, 0.41F});
+        }
 
         if (route.bridge) {
             MeshData bridge{build_bridge(route)};
@@ -921,18 +1356,49 @@ CaveSceneData build_cave_scene(
     }
 
     for (const PortalContract& portal : scene.portals) {
+        const auto route{std::find_if(scene.routes.begin(), scene.routes.end(),
+            [&](const RouteGeometryContract& candidate) {
+                return candidate.edge == portal.route;
+            })};
+        if (route == scene.routes.end()) {
+            throw GeometryError{"Portal has no route variant for its vestibule."};
+        }
         append_piece(
             scene,
             ScenePieceKind::junction,
             junction_piece_domain ^ stable_edge_id(portal.route)
                 ^ (static_cast<std::uint64_t>(portal.chamber_id.value) << 32U),
-            build_junction_mesh(portal),
+            build_junction_mesh(portal, *route),
             {0.31F, 0.34F, 0.39F});
     }
 
     set_start_camera(scene, topology);
     scene.fingerprint = cave_scene_fingerprint(effective_seed, scene);
-    scene.elemental_visuals = build_elemental_scene(topology, effective_seed);
+    std::vector<ElementalChamberSpatialContract> elemental_spatial;
+    elemental_spatial.reserve(scene.chambers.size());
+    for (const ChamberGeometryContract& chamber : scene.chambers) {
+        const ChamberNode& node{node_for(topology, chamber.node_id)};
+        if (node.role != ChamberRole::elemental) {
+            continue;
+        }
+        ElementalChamberSpatialContract spatial{
+            chamber.node_id,
+            chamber.center_millimetres,
+            chamber.minimum_safe_ring_radius_millimetres
+                - movement_envelope.capsule_radius_millimetres
+                - movement_envelope.safety_margin_millimetres,
+            chamber.wall_height_millimetres,
+            {},
+        };
+        for (const PortalContract& portal : scene.portals) {
+            if (portal.chamber_id == chamber.node_id) {
+                spatial.portal_centers_millimetres.push_back(portal.center_millimetres);
+            }
+        }
+        elemental_spatial.push_back(std::move(spatial));
+    }
+    scene.elemental_visuals = build_elemental_scene(
+        topology, effective_seed, elemental_spatial);
     const std::vector<std::string> errors{validate_cave_scene(topology, scene)};
     if (!errors.empty()) {
         throw GeometryError{errors.front()};

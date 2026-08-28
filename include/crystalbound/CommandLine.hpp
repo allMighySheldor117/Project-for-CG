@@ -17,6 +17,8 @@ public:
 struct CommandLineOptions {
     bool show_help{};
     std::optional<std::uint64_t> requested_seed{};
+    std::optional<std::uint32_t> profile_seconds{};
+    bool profile_no_vsync{};
 };
 
 using SeedSource = std::function<std::uint64_t()>;

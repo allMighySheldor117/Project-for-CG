@@ -91,6 +91,29 @@ void personas_match_locked_identities(const std::filesystem::path&)
         "Air lost its shimmer");
     require(elemental_persona(Element::aether).animation == CrystalAnimationKind::rhythmic,
         "Aether lost its rhythmic pulse");
+    const ElementalPersona& fire{elemental_persona(Element::fire)};
+    require(fire.albedo.red > fire.albedo.green * 4U
+            && fire.albedo.red > fire.albedo.blue * 4U,
+        "Fire collectible is not distinctly red");
+    const ElementalPersona& water{elemental_persona(Element::water)};
+    require(water.albedo.blue > water.albedo.green * 2U
+            && water.albedo.blue > water.albedo.red * 4U,
+        "Water collectible is not distinctly blue");
+    const ElementalPersona& earth{elemental_persona(Element::earth)};
+    require(earth.albedo.red > earth.albedo.green
+            && earth.albedo.green > earth.albedo.blue,
+        "Earth collectible is not a brown mineral color");
+    const ElementalPersona& air{elemental_persona(Element::air)};
+    const std::uint16_t air_minimum{std::min({
+        air.albedo.red, air.albedo.green, air.albedo.blue})};
+    const std::uint16_t air_maximum{std::max({
+        air.albedo.red, air.albedo.green, air.albedo.blue})};
+    require(air_minimum >= 850U && air_maximum - air_minimum <= 150U,
+        "Air collectible is not white");
+    const ElementalPersona& aether{elemental_persona(Element::aether)};
+    require(aether.albedo.blue > aether.albedo.red
+            && aether.albedo.red > aether.albedo.green,
+        "Aether collectible is not purple");
     std::set<std::array<std::uint16_t, 3>> colors;
     for (const Element element : elemental_order) {
         const LinearColorMilli color{elemental_persona(element).emission};
@@ -160,6 +183,87 @@ void crystal_meshes_are_valid_and_distinct(const std::filesystem::path&)
         shapes.insert({chamber.crystal.mesh.vertices.size(), chamber.crystal.mesh.indices.size()});
     }
     require(shapes.size() >= 4U, "crystal silhouettes are not sufficiently distinct");
+}
+
+[[nodiscard]] bool contains_error(
+    const std::vector<std::string>& errors,
+    const std::string_view needle)
+{
+    return std::any_of(errors.begin(), errors.end(),
+        [needle](const std::string& error) {
+            return error.find(needle) != std::string::npos;
+        });
+}
+
+void crystal_scale_is_player_relative(const std::filesystem::path&)
+{
+    const CaveGenerationResult result{generate_cave({42U})};
+    constexpr double minimum_height_metres{0.75};
+    constexpr double maximum_height_metres{1.10};
+    constexpr double minimum_radius_metres{0.25};
+    constexpr double maximum_radius_metres{0.42};
+    constexpr double mesh_measurement_tolerance{1.0e-5};
+    for (const ElementalChamberVisual& chamber : result.scene.elemental_visuals.chambers) {
+        const double scale{
+            static_cast<double>(chamber.crystal.base_scale_milli) / 1'000.0};
+        double minimum_y{std::numeric_limits<double>::infinity()};
+        double maximum_y{-std::numeric_limits<double>::infinity()};
+        double widest_radius{};
+        for (const Vertex& vertex : chamber.crystal.mesh.vertices) {
+            minimum_y = std::min(minimum_y,
+                static_cast<double>(vertex.position[1]) * scale);
+            maximum_y = std::max(maximum_y,
+                static_cast<double>(vertex.position[1]) * scale);
+            widest_radius = std::max(widest_radius,
+                std::hypot(static_cast<double>(vertex.position[0]),
+                    static_cast<double>(vertex.position[2])) * scale);
+        }
+        const double height{maximum_y - minimum_y};
+        require(height >= minimum_height_metres - mesh_measurement_tolerance
+                && height <= maximum_height_metres + mesh_measurement_tolerance,
+            std::string{element_name(chamber.element)}
+                + " crystal height is outside the 0.75-1.10 m band: "
+                + std::to_string(height));
+        require(widest_radius >= minimum_radius_metres - mesh_measurement_tolerance
+                && widest_radius <= maximum_radius_metres + mesh_measurement_tolerance,
+            std::string{element_name(chamber.element)}
+                + " crystal radius is outside the 0.25-0.42 m band: "
+                + std::to_string(widest_radius));
+    }
+}
+
+void crystal_animation_and_light_transforms_stay_synchronized(
+    const std::filesystem::path&)
+{
+    const CaveGenerationResult result{generate_cave({42U})};
+    constexpr std::array<float, 5> sample_times{
+        0.0F, 0.35F, 1.25F, 3.5F, 8.0F};
+    for (const ElementalChamberVisual& chamber : result.scene.elemental_visuals.chambers) {
+        for (const float time : sample_times) {
+            const ElementalTransformSample transform{
+                sample_elemental_transform(chamber.crystal, time)};
+            const PointLight light{crystal_point_light(chamber, time)};
+            const double expected_light_y{transform.position_metres.y
+                + static_cast<double>(chamber.crystal_shape.height_millimetres)
+                    / 2'000.0 * transform.uniform_scale};
+            require(std::isfinite(transform.position_metres.x)
+                    && std::isfinite(transform.position_metres.y)
+                    && std::isfinite(transform.position_metres.z)
+                    && std::isfinite(transform.uniform_scale)
+                    && std::isfinite(light.position_metres[0])
+                    && std::isfinite(light.position_metres[1])
+                    && std::isfinite(light.position_metres[2]),
+                "crystal animation or light transform became non-finite");
+            require(std::abs(static_cast<double>(light.position_metres[0])
+                        - transform.position_metres.x) < 1.0e-5
+                    && std::abs(static_cast<double>(light.position_metres[1])
+                        - expected_light_y) < 1.0e-5
+                    && std::abs(static_cast<double>(light.position_metres[2])
+                        - transform.position_metres.z) < 1.0e-5,
+                std::string{element_name(chamber.element)}
+                    + " crystal light drifted from its animated visible body");
+        }
+    }
 }
 
 void socket_variants_are_smaller(const std::filesystem::path&)
@@ -243,6 +347,79 @@ void elemental_budgets_are_enforced(const std::filesystem::path&)
         "particle budget was exceeded");
 }
 
+void elemental_formations_are_grouped_batched_and_keep_clear(
+    const std::filesystem::path&)
+{
+    const CaveGenerationResult result{generate_cave({42U})};
+    std::set<std::set<ElementalMotifFamily>> elemental_languages;
+    for (const ElementalChamberVisual& chamber : result.scene.elemental_visuals.chambers) {
+        if (chamber.element == Element::fire
+            || chamber.element == Element::water
+            || chamber.element == Element::earth
+            || chamber.element == Element::air) {
+            require(chamber.formations.empty(),
+                "authored chamber must not retain generated formations");
+            continue;
+        }
+        require(chamber.formations.size() == 15U,
+            "elemental chamber must contain fifteen logical formations");
+        std::set<std::uint64_t> ids;
+        std::set<std::uint32_t> groups;
+        std::set<ElementalMotifFamily> motifs;
+        std::set<std::uint64_t> render_batches;
+        std::uint32_t dominant_count{};
+        std::array<GeometryVector3, 5U> group_centers{};
+        std::array<std::uint32_t, 5U> group_counts{};
+        for (const ElementalFormationInstance& formation : chamber.formations) {
+            ids.insert(formation.stable_object_id);
+            groups.insert(formation.group_id);
+            motifs.insert(formation.motif);
+            render_batches.insert(formation.render_batch_id);
+            dominant_count += formation.dominant_landmark ? 1U : 0U;
+            require(formation.keep_clear_verified,
+                "formation lacks keep-clear evidence");
+            require(formation.group_id < group_centers.size(),
+                "formation group is outside the locked range");
+            group_centers[formation.group_id].x
+                += formation.position_millimetres.x_millimetres / 1'000.0;
+            group_centers[formation.group_id].z
+                += formation.position_millimetres.z_millimetres / 1'000.0;
+            ++group_counts[formation.group_id];
+        }
+        require(ids.size() == chamber.formations.size()
+                && groups.size() == 5U && motifs.size() == 3U
+                && render_batches.size() == 5U && dominant_count == 1U,
+            "formation identity, grouping, batching, or landmark contract drifted");
+        elemental_languages.insert(motifs);
+        for (std::size_t first{}; first < group_centers.size(); ++first) {
+            require(group_counts[first] == 3U,
+                "identity group does not contain three formations");
+            group_centers[first].x /= group_counts[first];
+            group_centers[first].z /= group_counts[first];
+            for (std::size_t second{}; second < first; ++second) {
+                const double dx{group_centers[first].x - group_centers[second].x};
+                const double dz{group_centers[first].z - group_centers[second].z};
+                const double maximum_crystal_diameter{
+                    2.0 * (chamber.crystal_shape.radius_millimetres + 20)
+                    / 1'000.0 * 1.08};
+                require(std::hypot(dx, dz) >= maximum_crystal_diameter,
+                    "identity group anchors are not spatially separated");
+            }
+        }
+        for (const std::uint64_t batch_id : render_batches) {
+            require(std::any_of(chamber.decorations.begin(), chamber.decorations.end(),
+                    [&](const ElementalVisualPiece& piece) {
+                        return piece.stable_object_id == batch_id
+                            && piece.kind == ElementalPieceKind::formation_batch
+                            && piece.layer == ElementalRenderLayer::opaque;
+                    }),
+                "logical formations lost their batched render mesh");
+        }
+    }
+    require(elemental_languages.size() == elemental_order.size() - 4U,
+        "the procedural Aether room lost its distinct motif language");
+}
+
 void elemental_render_passes_are_explicit(const std::filesystem::path&)
 {
     validate_render_pass_state(emissive_render_pass);
@@ -260,7 +437,7 @@ void elemental_render_passes_are_explicit(const std::filesystem::path&)
 void structural_and_collision_contracts_remain_unchanged(const std::filesystem::path&)
 {
     const CaveGenerationResult result{generate_cave({42U})};
-    require(result.scene.fingerprint == 0x9fb15c446b74730dULL,
+    require(result.scene.fingerprint == 0x1F8517F2C8D6C15AULL,
         "structural cave fingerprint changed");
     require(result.reachability.accepted, "elemental visuals changed reachability");
     for (const ElementalChamberVisual& chamber : result.scene.elemental_visuals.chambers) {
@@ -293,6 +470,151 @@ void generated_elemental_scene_validates(const std::filesystem::path&)
         "generated elemental visuals did not validate");
 }
 
+void authored_fire_keeps_only_the_collectible_crystal(const std::filesystem::path&)
+{
+    const CaveGenerationResult result{generate_cave({42U})};
+    const ElementalChamberVisual& fire{
+        chamber_for(result.scene.elemental_visuals, Element::fire)};
+    require(fire.formations.empty(),
+        "Fire chamber retains old generated formations");
+    require(fire.decorations.empty(),
+        "Fire chamber retains old generated decorations");
+    require(!fire.crystal.mesh.vertices.empty()
+            && fire.crystal.kind == ElementalPieceKind::crystal,
+        "Fire chamber lost its collectible crystal");
+    const auto fire_node{std::find_if(
+        result.generation.topology.nodes.begin(),
+        result.generation.topology.nodes.end(),
+        [](const ChamberNode& node) {
+            return node.element == Element::fire;
+        })};
+    require(fire_node != result.generation.topology.nodes.end()
+            && fire.crystal.base_position_millimetres.y_millimetres
+                == fire_node->anchor.elevation_millimetres
+                    + authored_fire_crystal_base_height_millimetres,
+        "Fire collectible does not float above the authored central altar");
+}
+
+void water_visual_bindings_cover_every_water_anchor(const std::filesystem::path&)
+{
+    const CaveGenerationResult result{generate_cave({42U})};
+    const ElementalChamberVisual& water{
+        chamber_for(result.scene.elemental_visuals, Element::water)};
+    require(water.decorations.empty(),
+        "Water chamber retains generated scenery supplied by the authored OBJ");
+    require(water.formations.empty(),
+        "Water chamber retains logical non-collectible formations");
+    require(!water.crystal.mesh.vertices.empty()
+            && water.crystal.kind == ElementalPieceKind::crystal,
+        "Water chamber lost its collectible crystal");
+}
+
+void authored_earth_keeps_only_the_collectible_crystal(
+    const std::filesystem::path&)
+{
+    const CaveGenerationResult result{generate_cave({42U})};
+    const ElementalChamberVisual& earth{
+        chamber_for(result.scene.elemental_visuals, Element::earth)};
+    require(earth.formations.empty(),
+        "Earth chamber retains old generated formations");
+    require(earth.decorations.empty(),
+        "Earth chamber retains old generated decorations");
+    require(!earth.crystal.mesh.vertices.empty()
+            && earth.crystal.kind == ElementalPieceKind::crystal,
+        "Earth chamber lost its collectible crystal");
+}
+
+void authored_air_keeps_one_centered_collectible_crystal(
+    const std::filesystem::path&)
+{
+    const CaveGenerationResult result{generate_cave({42U})};
+    const ElementalChamberVisual& air{
+        chamber_for(result.scene.elemental_visuals, Element::air)};
+    const auto air_node{std::find_if(
+        result.generation.topology.nodes.begin(),
+        result.generation.topology.nodes.end(),
+        [](const ChamberNode& node) {
+            return node.element == Element::air;
+        })};
+    require(air_node != result.generation.topology.nodes.end(),
+        "generated topology has no Air chamber node");
+    require(air.formations.empty(),
+        "Air chamber retains old generated formations");
+    require(air.decorations.empty(),
+        "Air chamber retains old generated decorations");
+    require(!air.crystal.mesh.vertices.empty()
+            && air.crystal.kind == ElementalPieceKind::crystal,
+        "Air chamber lost its collectible crystal");
+    require(air.crystal.base_position_millimetres.x_millimetres
+                == air_node->anchor.x_millimetres
+            && air.crystal.base_position_millimetres.z_millimetres
+                == air_node->anchor.z_millimetres,
+        "Air collectible crystal is not centered in the authored chamber");
+}
+
+void visual_pieces_stay_inside_owning_cosmetic_zones(
+    const std::filesystem::path&)
+{
+    const CaveGenerationResult result{generate_cave({42U})};
+    for (const ElementalChamberVisual& chamber
+        : result.scene.elemental_visuals.chambers) {
+        const auto spatial{std::find_if(
+            result.scene.elemental_visuals.spatial_contracts.begin(),
+            result.scene.elemental_visuals.spatial_contracts.end(),
+            [&](const ElementalChamberSpatialContract& contract) {
+                return contract.chamber_id == chamber.chamber_id;
+            })};
+        require(spatial != result.scene.elemental_visuals.spatial_contracts.end(),
+            "elemental cosmetic zone is missing");
+        for (const ElementalVisualPiece* piece : pieces_for(chamber)) {
+            const std::int64_t dx{static_cast<std::int64_t>(
+                piece->base_position_millimetres.x_millimetres)
+                - spatial->center_millimetres.x_millimetres};
+            const std::int64_t dz{static_cast<std::int64_t>(
+                piece->base_position_millimetres.z_millimetres)
+                - spatial->center_millimetres.z_millimetres};
+            const std::int64_t radius{spatial->usable_radius_millimetres};
+            require(dx * dx + dz * dz < radius * radius,
+                "visual piece escaped its owning cosmetic zone");
+        }
+    }
+}
+
+void elemental_material_budgets_aggregate(const std::filesystem::path&)
+{
+    const CaveGenerationResult result{generate_cave({42U})};
+    std::vector<MaterialKind> materials;
+    for (const ElementalChamberVisual& chamber
+        : result.scene.elemental_visuals.chambers) {
+        for (const ElementalVisualPiece* piece : pieces_for(chamber)) {
+            materials.push_back(piece->material);
+        }
+    }
+    const MaterialBudgetUsage usage{accumulate_material_budget(materials)};
+    require(usage.profile_count >= 3U && usage.mask_bytes > 0U,
+        "elemental material budget omitted active profiles");
+}
+
+void cosmetics_never_alter_gameplay_fingerprints(const std::filesystem::path&)
+{
+    const CaveGenerationResult result{generate_cave({42U})};
+    ElementalSceneData changed{result.scene.elemental_visuals};
+    auto decorated{std::find_if(changed.chambers.begin(), changed.chambers.end(),
+        [](const ElementalChamberVisual& chamber) {
+            return !chamber.decorations.empty();
+        })};
+    require(decorated != changed.chambers.end(),
+        "no generated cosmetic remains available for fingerprint mutation");
+    ++decorated->decorations.front().base_position_millimetres.x_millimetres;
+    require(elemental_scene_fingerprint({42U}, changed)
+            != result.scene.elemental_visuals.fingerprint,
+        "elemental cosmetic mutation did not change its visual fingerprint");
+    require(result.scene.template_gameplay_fingerprint
+            == template_gameplay_fingerprint(
+                result.generation.topology, result.scene.template_socket_assignments),
+        "cosmetic binding changed the gameplay fingerprint");
+}
+
 }  // namespace
 
 std::vector<TestCase> elemental_visuals_test_cases()
@@ -304,16 +626,35 @@ std::vector<TestCase> elemental_visuals_test_cases()
         {"decoration substreams are stable and independent", decoration_substreams_are_stable_and_independent},
         {"fixed-time animation is deterministic and bounded", fixed_time_animation_is_deterministic_and_bounded},
         {"crystal meshes are valid and distinct", crystal_meshes_are_valid_and_distinct},
+        {"crystal scale is player-relative", crystal_scale_is_player_relative},
+        {"crystal animation and light transforms stay synchronized",
+            crystal_animation_and_light_transforms_stay_synchronized},
         {"socket crystal variants are smaller", socket_variants_are_smaller},
         {"pedestals and crystals are present", pedestals_and_crystals_are_present},
         {"crystal emission and light match", crystal_emission_and_light_match},
         {"light selection reserves relevant crystal", light_selection_reserves_relevant_crystal},
         {"transparent sorting is stable", transparent_sort_is_stable},
         {"elemental budgets are enforced", elemental_budgets_are_enforced},
+        {"elemental formations are grouped batched and keep-clear",
+            elemental_formations_are_grouped_batched_and_keep_clear},
         {"elemental render passes are explicit", elemental_render_passes_are_explicit},
         {"structural and collision contracts remain unchanged", structural_and_collision_contracts_remain_unchanged},
         {"accepted and fallback visuals repeat", accepted_and_fallback_visuals_repeat},
         {"generated elemental scene validates", generated_elemental_scene_validates},
+        {"authored Fire keeps only the collectible crystal",
+            authored_fire_keeps_only_the_collectible_crystal},
+        {"Water visual bindings cover every water anchor",
+            water_visual_bindings_cover_every_water_anchor},
+        {"authored Earth keeps only the collectible crystal",
+            authored_earth_keeps_only_the_collectible_crystal},
+        {"authored Air keeps one centered collectible crystal",
+            authored_air_keeps_one_centered_collectible_crystal},
+        {"visual pieces stay inside owning cosmetic zones",
+            visual_pieces_stay_inside_owning_cosmetic_zones},
+        {"elemental material budgets aggregate",
+            elemental_material_budgets_aggregate},
+        {"cosmetics never alter gameplay fingerprints",
+            cosmetics_never_alter_gameplay_fingerprints},
     };
 }
 

@@ -14,6 +14,8 @@ constexpr double pi{3.14159265358979323846};
 constexpr double millimetres_per_metre{1'000.0};
 constexpr double numeric_epsilon{1.0e-9};
 constexpr double ray_origin_epsilon{1.0e-6};
+constexpr double authored_exit_visibility_radius_metres{24.55};
+constexpr double authored_exit_visibility_height_metres{16.0};
 
 [[nodiscard]] std::size_t element_index(const Element element) noexcept
 {
@@ -93,46 +95,6 @@ constexpr double ray_origin_epsilon{1.0e-6};
         return std::nullopt;
     }
     return multiply(value, 1.0 / magnitude);
-}
-
-[[nodiscard]] bool portal_opens_side(
-    const CaveSceneData& scene,
-    const NodeId chamber_id,
-    const std::uint32_t side) noexcept
-{
-    return std::any_of(
-        scene.portals.begin(), scene.portals.end(),
-        [chamber_id, side](const PortalContract& portal) {
-            return portal.chamber_id == chamber_id
-                && portal.opening_side_index == side;
-        });
-}
-
-[[nodiscard]] GeometryVector3 chamber_ring_position(
-    const ChamberGeometryContract& chamber,
-    const std::uint32_t side,
-    const double height_metres,
-    const double radius_scale = 1.0)
-{
-    const double angle{
-        2.0 * pi * static_cast<double>(side)
-        / static_cast<double>(chamber.side_count)};
-    const std::size_t offset_index{
-        static_cast<std::size_t>(side % chamber.side_count)};
-    const double radius{
-        static_cast<double>(
-            chamber.base_radius_millimetres
-            + chamber.radial_offsets_millimetres[offset_index])
-        / millimetres_per_metre * radius_scale};
-    return {
-        static_cast<double>(chamber.center_millimetres.x_millimetres)
-                / millimetres_per_metre
-            + std::cos(angle) * radius,
-        height_metres,
-        static_cast<double>(chamber.center_millimetres.z_millimetres)
-                / millimetres_per_metre
-            + std::sin(angle) * radius,
-    };
 }
 
 void append_triangle(
@@ -235,8 +197,7 @@ void append_triangle(
                 if (x * x + z * z
                         <= route.half_width_metres * route.half_width_metres
                             + numeric_epsilon
-                    && point.y >= floor - numeric_epsilon
-                    && point.y <= floor + 2.3 + numeric_epsilon) {
+                    && point.y >= floor - numeric_epsilon) {
                     return true;
                 }
             } else if (distance_squared(point, closest)
@@ -394,18 +355,10 @@ std::vector<CrystalInteractionTarget> build_crystal_interaction_targets(
     std::vector<CrystalInteractionTarget> targets;
     targets.reserve(visuals.chambers.size());
     for (const ElementalChamberVisual& chamber : visuals.chambers) {
-        const IntegerPoint3& position{chamber.crystal.base_position_millimetres};
         targets.push_back({
             chamber.element,
             chamber.crystal.stable_object_id,
-            {
-                static_cast<double>(position.x_millimetres)
-                    / millimetres_per_metre,
-                static_cast<double>(position.y_millimetres)
-                    / millimetres_per_metre,
-                static_cast<double>(position.z_millimetres)
-                    / millimetres_per_metre,
-            },
+            crystal_visible_body_aim_point(chamber),
         });
     }
     std::sort(targets.begin(), targets.end(), [](const auto& left, const auto& right) {
@@ -428,9 +381,12 @@ VisibilityWorld build_crystal_visibility_world(const CaveSceneData& scene)
         const double floor_y{
             static_cast<double>(chamber.center_millimetres.y_millimetres)
             / millimetres_per_metre};
-        const auto minimum_offset{std::min_element(
-            chamber.radial_offsets_millimetres.begin(),
-            chamber.radial_offsets_millimetres.end())};
+        const auto compiled{std::find_if(scene.compiled_chambers.begin(),
+            scene.compiled_chambers.end(), [&](const CompiledChamberTemplate& candidate) {
+                return candidate.chamber_id == chamber.node_id;
+            })};
+        const bool authored_exit{compiled != scene.compiled_chambers.end()
+            && compiled->role == ChamberTemplateRole::exit};
         world.chambers.push_back({
             chamber.node_id.value,
             {
@@ -441,44 +397,21 @@ VisibilityWorld build_crystal_visibility_world(const CaveSceneData& scene)
                     / millimetres_per_metre,
             },
             floor_y,
-            floor_y
-                + static_cast<double>(chamber.wall_height_millimetres)
+            floor_y + (authored_exit
+                    ? authored_exit_visibility_height_metres
+                    : static_cast<double>(chamber.wall_height_millimetres)
+                        / millimetres_per_metre),
+            authored_exit
+                ? authored_exit_visibility_radius_metres
+                : static_cast<double>(chamber.minimum_safe_ring_radius_millimetres)
                     / millimetres_per_metre,
-            static_cast<double>(
-                chamber.base_radius_millimetres + *minimum_offset)
-                / millimetres_per_metre,
         });
-        const double wall_top{
-            floor_y
-            + static_cast<double>(chamber.wall_height_millimetres)
-                / millimetres_per_metre * 0.72};
-        const GeometryVector3 apex{
-            static_cast<double>(chamber.center_millimetres.x_millimetres)
-                / millimetres_per_metre,
-            floor_y
-                + static_cast<double>(chamber.wall_height_millimetres)
-                    / millimetres_per_metre,
-            static_cast<double>(chamber.center_millimetres.z_millimetres)
-                / millimetres_per_metre,
-        };
-        for (std::uint32_t side{}; side < chamber.side_count; ++side) {
-            const std::uint32_t next{(side + 1U) % chamber.side_count};
-            const GeometryVector3 bottom_first{
-                chamber_ring_position(chamber, side, floor_y)};
-            const GeometryVector3 bottom_second{
-                chamber_ring_position(chamber, next, floor_y)};
-            const GeometryVector3 top_first{
-                chamber_ring_position(chamber, side, wall_top, 0.78)};
-            const GeometryVector3 top_second{
-                chamber_ring_position(chamber, next, wall_top, 0.78)};
-            const std::uint64_t base_id{
-                (static_cast<std::uint64_t>(chamber.node_id.value) << 32U)
-                | (static_cast<std::uint64_t>(side) << 3U)};
-            if (!portal_opens_side(scene, chamber.node_id, side)) {
-                append_triangle(world, base_id, bottom_first, bottom_second, top_second);
-                append_triangle(world, base_id + 1U, bottom_first, top_second, top_first);
+        if (!authored_exit) {
+            for (const ChamberStructuralTriangle& triangle :
+                chamber_structure_triangles(chamber, scene.portals)) {
+                append_triangle(world, triangle.stable_object_id,
+                    triangle.first, triangle.second, triangle.third);
             }
-            append_triangle(world, base_id + 2U, top_first, top_second, apex);
         }
     }
     world.routes.reserve(scene.routes.size());

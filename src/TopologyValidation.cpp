@@ -8,6 +8,8 @@
 #include <utility>
 #include <vector>
 
+#include "crystalbound/ChamberTemplates.hpp"
+
 namespace crystalbound {
 namespace {
 
@@ -202,6 +204,9 @@ void validate_cycle_contract(
     const TopologyData& topology,
     std::vector<std::string>& errors)
 {
+    if (topology.guaranteed_cycle.empty()) {
+        return;
+    }
     if (topology.guaranteed_cycle.size() < 3U) {
         errors.push_back("guaranteed cycle must contain at least three nodes");
         return;
@@ -284,6 +289,62 @@ std::vector<std::string> validate_topology(const TopologyData& topology)
             graph_distance(topology, *start_id, *exit_id)};
         if (!distance.has_value() || *distance < 1U) {
             errors.push_back("Exit graph distance from Start must be at least one");
+        }
+    }
+    return errors;
+}
+
+std::vector<std::string> validate_layout_capacity(const TopologyData& topology)
+{
+    std::vector<std::string> errors;
+    const auto reserved_radius = [](const ChamberNode& node) {
+        if (node.element == std::optional<Element>{Element::fire}) {
+            return authored_fire_playable_radius_millimetres;
+        }
+        if (node.element == std::optional<Element>{Element::water}) {
+            return authored_water_playable_radius_millimetres;
+        }
+        if (node.element == std::optional<Element>{Element::earth}) {
+            return authored_earth_playable_radius_millimetres;
+        }
+        if (node.element == std::optional<Element>{Element::air}) {
+            return authored_air_playable_radius_millimetres;
+        }
+        return layout_capacity_contract.maximum_chamber_outer_radius_millimetres;
+    };
+    for (std::size_t left{}; left < topology.nodes.size(); ++left) {
+        for (std::size_t right{left + 1U}; right < topology.nodes.size(); ++right) {
+            const std::int64_t dx{
+                static_cast<std::int64_t>(topology.nodes[right].anchor.x_millimetres)
+                - topology.nodes[left].anchor.x_millimetres};
+            const std::int64_t dz{
+                static_cast<std::int64_t>(topology.nodes[right].anchor.z_millimetres)
+                - topology.nodes[left].anchor.z_millimetres};
+            const std::int64_t minimum_separation{
+                static_cast<std::int64_t>(reserved_radius(topology.nodes[left]))
+                + reserved_radius(topology.nodes[right])
+                + layout_capacity_contract.chamber_safety_separation_millimetres};
+            const std::int64_t minimum_squared{
+                minimum_separation * minimum_separation};
+            if (dx * dx + dz * dz < minimum_squared) {
+                errors.push_back(
+                    "layout chamber envelopes violate final-size separation");
+                return errors;
+            }
+        }
+    }
+    const std::vector<std::string> template_errors{validate_all_chamber_templates()};
+    errors.insert(errors.end(), template_errors.begin(), template_errors.end());
+    if (errors.empty()) {
+        try {
+            const auto assignments{assign_template_sockets(topology)};
+            const auto assignment_errors{
+                validate_template_socket_assignments(topology, assignments)};
+            errors.insert(errors.end(), assignment_errors.begin(),
+                assignment_errors.end());
+        } catch (const std::exception& error) {
+            errors.push_back(std::string{"template socket assignment failed: "}
+                + error.what());
         }
     }
     return errors;

@@ -18,6 +18,8 @@ inline constexpr double maximum_crystal_focus_angle_degrees{12.0};
 struct CrystalInteractionTarget {
     Element element{Element::fire};
     std::uint64_t stable_object_id{};
+    // Stable nominal shoulder point used consistently for range, focus, LOS,
+    // and angle/distance/ID tie-breaking.
     GeometryVector3 position_metres{};
 };
 

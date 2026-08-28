@@ -1,5 +1,7 @@
+#include <cstdint>
 #include <exception>
 #include <iostream>
+#include <optional>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -11,10 +13,15 @@
 
 namespace {
 
-int run_application(crystalbound::CaveGenerationResult generation)
+int run_application(
+    crystalbound::CaveGenerationResult generation,
+    const std::optional<std::uint32_t> profile_seconds,
+    const bool profile_vsync)
 {
     try {
-        crystalbound::Application application{std::move(generation)};
+        crystalbound::Application application{
+            std::move(generation), crystalbound::os_entropy_seed,
+            profile_seconds, profile_vsync};
         return application.run();
     } catch (const std::exception& error) {
         std::cerr << "Fatal error: " << error.what() << '\n';
@@ -26,13 +33,17 @@ void print_usage()
 {
     std::cout
         << "Crystalbound - elemental cave exploration\n"
-        << "Usage: crystalbound [--seed <uint64>]\n\n"
+        << "Usage: crystalbound [--seed <uint64>] [--profile-seconds <1..3600>]\n"
+        << "                    [--profile-no-vsync]\n\n"
         << "Explore a deterministic low-poly cave, collect the five elemental\n"
         << "crystals in any order, then return them to the exit arch.\n"
         << "Use WASD to move, the mouse to look, Space to jump, Shift to sprint,\n"
         << "E to interact, and Esc to pause.\n"
         << "Options:\n"
         << "  --seed <uint64>  Use a strict unsigned decimal requested seed.\n"
+        << "  --profile-seconds <seconds>  After a 5 s warm-up, measure frame times\n"
+        << "                               and close automatically (development only).\n"
+        << "  --profile-no-vsync           Disable VSync for an uncapped development profile.\n"
         << "  -h, --help       Show this help text without opening a window.\n";
 }
 
@@ -92,7 +103,8 @@ int main(const int argument_count, char* arguments[])
         crystalbound::CaveGenerationResult generation{
             crystalbound::generate_cave(requested_seed)};
         print_generation_diagnostic(generation);
-        return run_application(std::move(generation));
+        return run_application(
+            std::move(generation), options.profile_seconds, !options.profile_no_vsync);
     } catch (const crystalbound::CommandLineError& error) {
         std::cerr << "Command-line error: " << error.what()
                   << "\nUse --help for current usage.\n";

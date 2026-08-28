@@ -97,8 +97,8 @@ void validate_contract_counts(
     if (scene.portals.size() != topology.routes.size() * 2U) {
         errors.push_back("Every route must have one portal at each endpoint.");
     }
-    if (scene.bridge_routes.empty()) {
-        errors.push_back("Every accepted cave must contain at least one bridge route.");
+    if (!scene.bridge_routes.empty()) {
+        errors.push_back("The fixed layout must not contain bridge routes.");
     }
 }
 
@@ -116,9 +116,34 @@ void validate_chambers(
                 < movement_envelope.minimum_clearance_height_millimetres
                     + movement_envelope.safety_margin_millimetres
             || chamber.side_count < 8U
-            || chamber.radial_offsets_millimetres.size() != chamber.side_count) {
+            || chamber.radial_offsets_millimetres.size() != chamber.side_count
+            || chamber.minimum_safe_ring_radius_millimetres <= 0
+            || chamber.rings.size() < 4U) {
             errors.push_back("Chamber geometry violates its radius, height, or facet contract.");
         }
+        std::int32_t previous_height{-1};
+        for (const ChamberRingContract& ring : chamber.rings) {
+            if (ring.height_millimetres <= previous_height
+                || ring.height_millimetres > chamber.wall_height_millimetres
+                || ring.radii_millimetres.size() != chamber.side_count
+                || std::any_of(ring.radii_millimetres.begin(),
+                    ring.radii_millimetres.end(), [](const std::int32_t radius) {
+                        return radius <= 0;
+                    })) {
+                errors.push_back("Chamber multi-ring shell contract is invalid.");
+                break;
+            }
+            previous_height = ring.height_millimetres;
+        }
+        if (!chamber.rings.empty()
+            && (chamber.rings.front().height_millimetres != 0
+                || chamber.rings.back().height_millimetres
+                    != chamber.wall_height_millimetres)) {
+            errors.push_back("Chamber rings do not span floor to ceiling.");
+        }
+    }
+    if (scene.compiled_chambers.size() != topology.nodes.size()) {
+        errors.push_back("Every topology node must compile from template data.");
     }
 }
 
@@ -128,7 +153,6 @@ void validate_routes(
     std::vector<std::string>& errors)
 {
     std::size_t bridge_count{};
-    bool curved_route{};
     for (const RouteGeometryContract& route : scene.routes) {
         if (!topology_has_edge(topology, route.edge)) {
             errors.push_back("Route geometry references an unknown topology edge.");
@@ -152,23 +176,71 @@ void validate_routes(
             || route.spline.control_points.front() != first->center_millimetres
             || route.spline.control_points.back() != second->center_millimetres) {
             errors.push_back("Route endpoints do not agree with their declared portals.");
+        } else {
+            const auto required_approach_depth = [&](const PortalContract& portal) {
+                const auto compiled{std::find_if(scene.compiled_chambers.begin(),
+                    scene.compiled_chambers.end(), [&](const CompiledChamberTemplate& chamber) {
+                        return chamber.chamber_id == portal.chamber_id;
+                    })};
+                return compiled != scene.compiled_chambers.end()
+                        && (compiled->role == ChamberTemplateRole::aether
+                            || compiled->role == ChamberTemplateRole::exit)
+                    ? authored_terminal_junction_depth_millimetres
+                    : route_junction_depth_millimetres;
+            };
+            if (first->approach_depth_millimetres < required_approach_depth(*first)
+                || second->approach_depth_millimetres
+                    < required_approach_depth(*second)) {
+                errors.push_back("Route portal approach depth is too short.");
+            }
         }
-        curved_route = curved_route || route_is_curved(route);
+        if (route.vestibule_length_millimetres != route_junction_depth_millimetres
+            || route.join_overlap_millimetres != route_join_overlap_millimetres) {
+            errors.push_back("Route vestibule and overlap contracts are not exact.");
+        }
+        if (route_is_curved(route)
+            || !std::all_of(route.spline.control_points.begin(),
+                route.spline.control_points.end(),
+                [&](const IntegerPoint3& point) {
+                    return point.y_millimetres
+                        == route.spline.control_points.front().y_millimetres;
+                })) {
+            errors.push_back(
+                "Temporary fixed-layout tunnels must be straight and level.");
+        }
         if (route.bridge) {
             ++bridge_count;
+            errors.push_back("The fixed layout must not contain bridge geometry.");
             if (route.bridge_width_millimetres
                     < movement_envelope.minimum_clearance_width_millimetres
                         + movement_envelope.safety_margin_millimetres
                 || route.bridge_rail_height_millimetres <= 0) {
                 errors.push_back("Bridge dimensions violate the locked traversal envelope.");
             }
+        } else if (route.tunnel_clear_width_millimetres
+                       != tunnel_clear_width_millimetres
+            || route.tunnel_side_height_millimetres
+                != tunnel_side_height_millimetres
+            || route.tunnel_crown_height_millimetres
+                != tunnel_crown_height_millimetres) {
+            errors.push_back("Ordinary routes do not use the exact horseshoe profile.");
         }
     }
-    if (!curved_route) {
-        errors.push_back("The generated cave must contain curved route geometry.");
-    }
-    if (bridge_count != scene.bridge_routes.size() || bridge_count == 0U) {
+    if (bridge_count != 0U || !scene.bridge_routes.empty()) {
         errors.push_back("Bridge route markers and bridge contracts disagree.");
+    }
+    if (!std::is_sorted(scene.bridge_routes.begin(), scene.bridge_routes.end())) {
+        errors.push_back("Bridge routes are not in canonical order.");
+    }
+    if (scene.bridge_routes.size() == 2U) {
+        const Edge first_bridge{scene.bridge_routes[0]};
+        const Edge second_bridge{scene.bridge_routes[1]};
+        if (first_bridge.first == second_bridge.first
+            || first_bridge.first == second_bridge.second
+            || first_bridge.second == second_bridge.first
+            || first_bridge.second == second_bridge.second) {
+            errors.push_back("Optional bridges must be endpoint-disjoint.");
+        }
     }
     for (const Edge edge : scene.bridge_routes) {
         const auto found = std::find_if(
@@ -186,7 +258,13 @@ void validate_meshes_and_budgets(
     std::vector<std::string>& errors)
 {
     std::uint64_t vertex_count{};
+    std::size_t hazard_surface_count{};
+    std::size_t tunnel_mesh_count{};
+    std::size_t bridge_mesh_count{};
     for (const SceneMeshPiece& piece : scene.mesh_pieces) {
+        hazard_surface_count += piece.kind == ScenePieceKind::chamber_hazard ? 1U : 0U;
+        tunnel_mesh_count += piece.kind == ScenePieceKind::tunnel ? 1U : 0U;
+        bridge_mesh_count += piece.kind == ScenePieceKind::bridge ? 1U : 0U;
         try {
             validate_procedural_mesh(piece.mesh);
         } catch (const GeometryError& error) {
@@ -202,6 +280,25 @@ void validate_meshes_and_budgets(
             })) {
             errors.push_back("Scene mesh has an invalid debug albedo.");
         }
+    }
+    const std::size_t hazard_chamber_count{static_cast<std::size_t>(
+        std::count_if(scene.compiled_chambers.begin(),
+            scene.compiled_chambers.end(), [](const CompiledChamberTemplate& chamber) {
+                return !chamber.hazards.empty();
+            }))};
+    if (hazard_surface_count != hazard_chamber_count) {
+        errors.push_back("Template hazard render surfaces disagree with gameplay hazards.");
+    }
+    const std::size_t tunnel_collider_count{static_cast<std::size_t>(
+        std::count_if(scene.colliders.begin(), scene.colliders.end(),
+            [](const SceneCollider& collider) {
+                return collider.kind == ColliderKind::tunnel;
+            }))};
+    if (tunnel_mesh_count + scene.bridge_routes.size() != scene.routes.size()
+        || tunnel_collider_count != tunnel_mesh_count
+        || bridge_mesh_count != scene.bridge_routes.size()) {
+        errors.push_back(
+            "Bridge routes emit a tunnel mesh, collider, support, or roof.");
     }
     if (vertex_count != scene.static_vertex_count
         || vertex_count > geometry_budgets.maximum_static_vertices) {
@@ -229,12 +326,18 @@ void validate_colliders(const CaveSceneData& scene, std::vector<std::string>& er
     for (const ColliderKind required : {
              ColliderKind::chamber_floor,
              ColliderKind::chamber_boundary,
-             ColliderKind::tunnel,
+             ColliderKind::tunnel}) {
+        if (!has_collider_kind(scene, required)) {
+            errors.push_back("Scene is missing a required collider category.");
+        }
+    }
+    for (const ColliderKind forbidden : {
              ColliderKind::bridge_deck,
              ColliderKind::bridge_rail,
              ColliderKind::fall_region}) {
-        if (!has_collider_kind(scene, required)) {
-            errors.push_back("Scene is missing a required collider category.");
+        if (has_collider_kind(scene, forbidden)) {
+            errors.push_back(
+                "Tunnel-only layout contains a bridge-specific collider.");
         }
     }
 }
@@ -247,6 +350,9 @@ std::vector<std::string> validate_cave_scene(
 {
     std::vector<std::string> errors{validate_topology(topology)};
     validate_contract_counts(topology, scene, errors);
+    const std::vector<std::string> compiled_errors{
+        validate_compiled_chamber_templates(topology, scene.compiled_chambers)};
+    errors.insert(errors.end(), compiled_errors.begin(), compiled_errors.end());
     validate_chambers(topology, scene, errors);
     validate_routes(topology, scene, errors);
     validate_meshes_and_budgets(scene, errors);

@@ -14,6 +14,7 @@
 
 #include "crystalbound/CaveScene.hpp"
 #include "crystalbound/CrystalCollection.hpp"
+#include "crystalbound/ExitArch.hpp"
 #include "crystalbound/PlayerController.hpp"
 
 namespace crystalbound::test {
@@ -306,6 +307,209 @@ void generated_visibility_does_not_fill_chambers(const std::filesystem::path&)
     }
 }
 
+[[nodiscard]] GeometryVector3 normalized_direction(
+    const GeometryVector3& from,
+    const GeometryVector3& to)
+{
+    const GeometryVector3 offset{
+        to.x - from.x, to.y - from.y, to.z - from.z};
+    const double distance{std::sqrt(
+        offset.x * offset.x + offset.y * offset.y + offset.z * offset.z)};
+    require(std::isfinite(distance) && distance > 1.0e-9,
+        "generated crystal aim direction is invalid");
+    return {offset.x / distance, offset.y / distance, offset.z / distance};
+}
+
+void fixed_tunnel_visibility_is_enclosed(const std::filesystem::path&)
+{
+    const CaveGenerationResult generation{generate_cave({42U})};
+    const VisibilityWorld visibility{
+        build_crystal_visibility_world(generation.scene)};
+    require(visibility.routes.size() == 6U,
+        "fixed layout visibility must contain six routes");
+    for (const VisibilityRouteSpace& route : visibility.routes) {
+        require(!route.bridge, "fixed tunnel visibility is marked as open bridge space");
+        require(route.samples.size() >= 3U,
+            "fixed tunnel visibility has too few spline samples");
+        require(std::abs(route.half_width_metres - route.radius_metres) < 1.0e-9,
+            "fixed tunnel visibility does not use its enclosed radial boundary");
+    }
+}
+
+[[nodiscard]] const ChamberCollisionRegion& elemental_collision_chamber(
+    const CollisionWorld& world,
+    const NodeId chamber_id)
+{
+    const auto found{std::find_if(
+        world.chambers.begin(), world.chambers.end(),
+        [chamber_id](const ChamberCollisionRegion& chamber) {
+            return chamber.chamber_id == chamber_id;
+        })};
+    if (found == world.chambers.end()) {
+        throw CollectionTestFailure{"generated elemental chamber collision is missing"};
+    }
+    return *found;
+}
+
+void generated_seed_42_crystals_collect_from_visible_body_aim(
+    const std::filesystem::path&)
+{
+    const CaveGenerationResult generation{generate_cave({42U})};
+    const CollisionWorld world{build_collision_world(generation.scene)};
+    const VisibilityWorld visibility{
+        build_crystal_visibility_world(generation.scene)};
+    const std::vector<CrystalInteractionTarget> targets{
+        build_crystal_interaction_targets(generation.scene.elemental_visuals)};
+    const ExitArchData arch{build_exit_arch(generation)};
+    CrystalCollectionState collection;
+    RisingEdgeButton interaction_button;
+    std::string failures;
+
+    for (const ElementalChamberVisual& chamber
+        : generation.scene.elemental_visuals.chambers) {
+        const ChamberCollisionRegion& collision{
+            elemental_collision_chamber(world, chamber.chamber_id)};
+        constexpr double grounded_view_distance_metres{0.85};
+        const GeometryVector3 feet{
+            collision.center_metres.x,
+            collision.floor_height_metres,
+            collision.center_metres.z + grounded_view_distance_metres,
+        };
+        GroundedController controller{world, {feet, chamber.chamber_id}};
+        const GeometryVector3 camera{controller.camera_position_metres()};
+        const double crystal_scale{
+            static_cast<double>(chamber.crystal.base_scale_milli) / 1'000.0};
+        const GeometryVector3 visible_shoulder{
+            static_cast<double>(chamber.crystal.base_position_millimetres.x_millimetres)
+                / 1'000.0,
+            static_cast<double>(chamber.crystal.base_position_millimetres.y_millimetres)
+                    / 1'000.0
+                + static_cast<double>(chamber.crystal_shape.shoulder_height_millimetres)
+                    / 1'000.0 * crystal_scale,
+            static_cast<double>(chamber.crystal.base_position_millimetres.z_millimetres)
+                / 1'000.0,
+        };
+        const CameraInteractionQuery query{
+            camera, normalized_direction(camera, visible_shoulder)};
+        const auto interaction_target{std::find_if(
+            targets.begin(), targets.end(),
+            [&](const CrystalInteractionTarget& candidate) {
+                return candidate.element == chamber.element;
+            })};
+        require(interaction_target != targets.end(),
+            "generated elemental interaction target is missing");
+        require(std::abs(interaction_target->position_metres.x - visible_shoulder.x)
+                    < 1.0e-9
+                && std::abs(interaction_target->position_metres.y - visible_shoulder.y)
+                    < 1.0e-9
+                && std::abs(interaction_target->position_metres.z - visible_shoulder.z)
+                    < 1.0e-9,
+            "interaction target is not derived from the rendered crystal shoulder");
+        const FocusedCrystalResult focus{
+            focus_crystal(targets, query, visibility, collection)};
+        const ExitFocusResult exit_focus{focus_exit_arch(arch, query, visibility)};
+        static_cast<void>(interaction_button.update(false));
+        const bool pressed_edge{interaction_button.update(true)};
+        const CollectionAttemptResult attempt{attempt_crystal_collection(
+            targets, query, visibility, pressed_edge, collection)};
+
+        if (!focus.focused.has_value() || exit_focus.focused.has_value()
+            || !pressed_edge || !attempt.collected
+            || attempt.element != chamber.element) {
+            failures += std::string{element_name(chamber.element)}
+                + ": feet=(" + std::to_string(feet.x) + ","
+                + std::to_string(feet.y) + "," + std::to_string(feet.z)
+                + "), camera=(" + std::to_string(camera.x) + ","
+                + std::to_string(camera.y) + "," + std::to_string(camera.z)
+                + "), forward=(" + std::to_string(query.forward.x) + ","
+                + std::to_string(query.forward.y) + ","
+                + std::to_string(query.forward.z) + "), prompt="
+                + (focus.focused.has_value() ? "true" : "false")
+                + ", edge=" + (pressed_edge ? "true" : "false")
+                + ", mouse_capture=true, exit_focus="
+                + (exit_focus.focused.has_value() ? "true" : "false")
+                + ", rejection="
+                + std::to_string(static_cast<std::uint32_t>(attempt.rejection))
+                + "; ";
+        } else {
+            require(!is_elemental_piece_visible(chamber.crystal, collection),
+                "collection did not hide the matching generated crystal mesh");
+            const std::vector<StableLightCandidate> lights{active_crystal_lights(
+                generation.scene.elemental_visuals, collection,
+                chamber.chamber_id, 1.0F)};
+            require(std::none_of(
+                lights.begin(), lights.end(),
+                [&](const StableLightCandidate& candidate) {
+                    return candidate.light.stable_object_id
+                        == chamber.crystal.stable_object_id;
+                }),
+                "collection did not remove the matching generated crystal light");
+        }
+    }
+
+    require(failures.empty(),
+        "generated visible-body collection failed: " + failures);
+    require(collection.all_collected(),
+        "generated visible-body collection did not collect all five crystals");
+    for (const Element element : elemental_order) {
+        require(collection.socket_display_state().displays(element),
+            "generated collection did not update its arch socket");
+    }
+}
+
+void generated_crystal_targets_cover_animation_extrema(
+    const std::filesystem::path&)
+{
+    const CaveGenerationResult generation{generate_cave({42U})};
+    const CollisionWorld world{build_collision_world(generation.scene)};
+    const VisibilityWorld visibility{
+        build_crystal_visibility_world(generation.scene)};
+    const std::vector<CrystalInteractionTarget> targets{
+        build_crystal_interaction_targets(generation.scene.elemental_visuals)};
+    const CrystalCollectionState collection;
+    constexpr std::array<float, 6> sample_times{
+        0.0F, 0.25F, 0.75F, 1.75F, 4.0F, 9.0F};
+
+    for (const ElementalChamberVisual& chamber
+        : generation.scene.elemental_visuals.chambers) {
+        const ChamberCollisionRegion& collision{
+            elemental_collision_chamber(world, chamber.chamber_id)};
+        const GeometryVector3 feet{
+            collision.center_metres.x,
+            collision.floor_height_metres,
+            collision.center_metres.z + 0.85,
+        };
+        const GroundedController controller{world, {feet, chamber.chamber_id}};
+        const GeometryVector3 camera{controller.camera_position_metres()};
+        const auto target{std::find_if(
+            targets.begin(), targets.end(),
+            [&](const CrystalInteractionTarget& candidate) {
+                return candidate.element == chamber.element;
+            })};
+        require(target != targets.end(), "animated crystal target is missing");
+        for (const float time : sample_times) {
+            const ElementalTransformSample transform{
+                sample_elemental_transform(chamber.crystal, time)};
+            const GeometryVector3 animated_shoulder{
+                transform.position_metres.x,
+                transform.position_metres.y
+                    + static_cast<double>(
+                          chamber.crystal_shape.shoulder_height_millimetres)
+                        / 1'000.0 * transform.uniform_scale,
+                transform.position_metres.z,
+            };
+            const CameraInteractionQuery query{
+                camera, normalized_direction(camera, animated_shoulder)};
+            const FocusedCrystalResult focus{
+                focus_crystal({*target}, query, visibility, collection)};
+            require(focus.focused.has_value()
+                    && focus.focused->target.element == chamber.element,
+                std::string{element_name(chamber.element)}
+                    + " animation moved the visible body outside its stable interaction target");
+        }
+    }
+}
+
 void collection_survives_controller_respawn(const std::filesystem::path&)
 {
     CollisionWorld world;
@@ -354,7 +558,7 @@ void structural_and_seed_contracts_are_preserved(const std::filesystem::path&)
 {
     const CaveGenerationResult first{generate_cave({42U})};
     const CaveGenerationResult repeat{generate_cave({42U})};
-    require(first.scene.fingerprint == 0x9fb15c446b74730dULL,
+    require(first.scene.fingerprint == 0x1F8517F2C8D6C15AULL,
         "structural cave fingerprint changed");
     require(first.scene.fingerprint == repeat.scene.fingerprint
             && first.generation.fingerprint == repeat.generation.fingerprint,
@@ -385,6 +589,12 @@ std::vector<TestCase> crystal_collection_test_cases()
         {"invalid camera queries are rejected", invalid_camera_queries_are_rejected},
         {"rendering hides only collected crystal", rendering_state_hides_only_collected_crystal},
         {"generated visibility does not fill chambers", generated_visibility_does_not_fill_chambers},
+        {"fixed tunnel visibility is enclosed",
+            fixed_tunnel_visibility_is_enclosed},
+        {"generated seed-42 crystals collect from visible-body aim",
+            generated_seed_42_crystals_collect_from_visible_body_aim},
+        {"generated crystal targets cover animation extrema",
+            generated_crystal_targets_cover_animation_extrema},
         {"collection survives controller respawn", collection_survives_controller_respawn},
         {"structural and seed contracts are preserved", structural_and_seed_contracts_are_preserved},
     };

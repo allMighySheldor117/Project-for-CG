@@ -255,11 +255,8 @@ void append_traversal_issues(
         return verdict;
     }
     verdict.stable_object_id = chamber->stable_object_id;
-    const GeometryVector3 respawn{
-        chamber->center_metres.x,
-        chamber->floor_height_metres,
-        chamber->center_metres.z,
-    };
+    const GeometryVector3 respawn{chamber_respawn_position(
+        world, *chamber, chamber->center_metres)};
     const bool finite{finite_vector(respawn)
         && std::isfinite(chamber->ceiling_height_metres)
         && std::isfinite(chamber->usable_radius_metres)};
@@ -333,6 +330,9 @@ void build_reachable_set(MechanicalReachabilityReport& report)
     const TopologyData& topology,
     const MechanicalReachabilityReport& report) noexcept
 {
+    if (topology.guaranteed_cycle.empty()) {
+        return true;
+    }
     if (topology.guaranteed_cycle.size() < 3U) {
         return false;
     }

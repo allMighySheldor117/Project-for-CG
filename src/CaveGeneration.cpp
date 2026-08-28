@@ -25,6 +25,11 @@ CaveGenerationResult generate_cave(
                                            const TopologyData& topology)
         -> std::optional<std::string> {
         try {
+            const std::vector<std::string> layout_errors{
+                validate_layout_capacity(topology)};
+            if (!layout_errors.empty()) {
+                return std::string{"layout rejected: "} + layout_errors.front();
+            }
             const Seed attempt_seed{derive_attempt_seed(requested_seed, attempt_index)};
             CaveSceneData candidate{build_cave_scene(topology, attempt_seed)};
             if (seams.reject_attempt) {

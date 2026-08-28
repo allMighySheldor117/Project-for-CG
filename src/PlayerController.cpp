@@ -69,6 +69,81 @@ constexpr double comparison_tolerance{1.0e-9};
         });
 }
 
+[[nodiscard]] const PortalContract& route_portal(
+    const CaveSceneData& scene,
+    const NodeId chamber_id,
+    const Edge edge)
+{
+    const auto found{std::find_if(
+        scene.portals.begin(), scene.portals.end(),
+        [chamber_id, edge](const PortalContract& portal) {
+            return portal.chamber_id == chamber_id && portal.route == edge;
+        })};
+    if (found == scene.portals.end()) {
+        throw ControllerError{"Collision route is missing a portal contract."};
+    }
+    return *found;
+}
+
+[[nodiscard]] GeometryVector3 junction_inner_point(
+    const GeometryVector3& endpoint,
+    const PortalContract& portal,
+    const std::int32_t depth_millimetres) noexcept
+{
+    constexpr double direction_scale_millimetres{1'000.0};
+    const double depth_scale{
+        static_cast<double>(depth_millimetres)
+        / direction_scale_millimetres / millimetres_per_metre};
+    return {
+        endpoint.x
+            + static_cast<double>(portal.inward_direction_millimetres.x_millimetres)
+                * depth_scale,
+        endpoint.y,
+        endpoint.z
+            + static_cast<double>(portal.inward_direction_millimetres.z_millimetres)
+                * depth_scale,
+    };
+}
+
+[[nodiscard]] std::vector<SplineSample> collision_route_samples(
+    const CaveSceneData& scene,
+    const RouteGeometryContract& route)
+{
+    std::vector<SplineSample> samples{
+        sample_centripetal_catmull_rom(route.spline)};
+    if (samples.size() < 2U) {
+        throw ControllerError{"Collision route requires at least two spline samples."};
+    }
+    const PortalContract& first{route_portal(scene, route.edge.first, route.edge)};
+    const PortalContract& second{route_portal(scene, route.edge.second, route.edge)};
+    const std::int32_t first_depth_millimetres{route.bridge
+            ? route_junction_depth_millimetres
+            : first.approach_depth_millimetres};
+    const std::int32_t second_depth_millimetres{route.bridge
+            ? route_junction_depth_millimetres
+            : second.approach_depth_millimetres};
+    const double first_depth_metres{
+        static_cast<double>(first_depth_millimetres) / millimetres_per_metre};
+    const double second_depth_metres{
+        static_cast<double>(second_depth_millimetres) / millimetres_per_metre};
+    for (SplineSample& sample : samples) {
+        sample.distance_metres += first_depth_metres;
+    }
+    samples.insert(samples.begin(), {
+        junction_inner_point(
+            samples.front().position_metres, first, first_depth_millimetres),
+        samples.front().tangent,
+        0.0,
+    });
+    samples.push_back({
+        junction_inner_point(
+            samples.back().position_metres, second, second_depth_millimetres),
+        samples.back().tangent,
+        samples.back().distance_metres + second_depth_metres,
+    });
+    return samples;
+}
+
 [[nodiscard]] RouteCollisionRegion::DirectedMeasurements directed_measurements(
     const CaveSceneData& scene,
     const RouteGeometryContract& route,
@@ -84,18 +159,50 @@ constexpr double comparison_tolerance{1.0e-9};
         forward ? route.spline.control_points.back() : route.spline.control_points.front()};
     const ChamberGeometryContract& from{scene_chamber(scene, from_id)};
     const ChamberGeometryContract& to{scene_chamber(scene, to_id)};
+    const auto authored_role = [&](const NodeId chamber_id) {
+        const auto found{std::find_if(scene.compiled_chambers.begin(),
+            scene.compiled_chambers.end(), [chamber_id](const CompiledChamberTemplate& chamber) {
+                return chamber.chamber_id == chamber_id;
+            })};
+        return found == scene.compiled_chambers.end()
+            ? ChamberTemplateRole::neutral : found->role;
+    };
+    const ChamberTemplateRole from_role{authored_role(from_id)};
+    const ChamberTemplateRole to_role{authored_role(to_id)};
+    const auto landing_height = [](const ChamberTemplateRole role) {
+        return role == ChamberTemplateRole::water
+            ? authored_water_landing_height_millimetres
+            : role == ChamberTemplateRole::fire
+                ? authored_fire_landing_height_millimetres
+                : 0;
+    };
     const std::int32_t from_route_floor{
         from_endpoint.y_millimetres - route.spline.radius_millimetres};
     const std::int32_t to_route_floor{
         to_endpoint.y_millimetres - route.spline.radius_millimetres};
+    const std::int32_t from_landing_floor{
+        from.center_millimetres.y_millimetres
+        + landing_height(from_role)};
+    const std::int32_t to_landing_floor{
+        to.center_millimetres.y_millimetres
+        + landing_height(to_role)};
     const std::int32_t entry_step{
-        std::max(0, from_route_floor - from.center_millimetres.y_millimetres)};
+        std::max(0, from_route_floor - from_landing_floor)};
     const std::int32_t exit_step{
-        std::max(0, to.center_millimetres.y_millimetres - to_route_floor)};
+        std::max(0, to_landing_floor - to_route_floor)};
+    const auto maximum_authored_step = [](const ChamberTemplateRole role) {
+        return role == ChamberTemplateRole::water
+            ? authored_water_maximum_step_millimetres
+            : role == ChamberTemplateRole::fire
+                ? authored_fire_maximum_step_millimetres
+                : 0;
+    };
+    const std::int32_t authored_step{std::max(
+        maximum_authored_step(from_role), maximum_authored_step(to_role))};
     const bool from_portal{has_route_portal(scene, from_id, route.edge, from_endpoint)};
     const bool to_portal{has_route_portal(scene, to_id, route.edge, to_endpoint)};
     return {
-        std::max(entry_step, exit_step),
+        std::max({entry_step, exit_step, authored_step}),
         0,
         landing_width_millimetres,
         from_portal,
@@ -129,13 +236,10 @@ constexpr double comparison_tolerance{1.0e-9};
 [[nodiscard]] double minimum_chamber_radius_metres(
     const ChamberGeometryContract& chamber)
 {
-    const auto minimum_offset = std::min_element(
-        chamber.radial_offsets_millimetres.begin(),
-        chamber.radial_offsets_millimetres.end());
-    if (minimum_offset == chamber.radial_offsets_millimetres.end()) {
-        throw ControllerError{"Chamber collision requires radial offsets."};
+    if (chamber.minimum_safe_ring_radius_millimetres <= 0) {
+        throw ControllerError{"Chamber collision requires a safe ring radius."};
     }
-    return static_cast<double>(chamber.base_radius_millimetres + *minimum_offset)
+    return static_cast<double>(chamber.minimum_safe_ring_radius_millimetres)
         / millimetres_per_metre;
 }
 
@@ -146,6 +250,79 @@ constexpr double comparison_tolerance{1.0e-9};
     return point.x >= bounds.minimum_metres.x && point.x <= bounds.maximum_metres.x
         && point.y >= bounds.minimum_metres.y && point.y <= bounds.maximum_metres.y
         && point.z >= bounds.minimum_metres.z && point.z <= bounds.maximum_metres.z;
+}
+
+[[nodiscard]] bool point_in_polygon(
+    const GeometryVector3& point,
+    const std::vector<TemplatePoint2>& polygon) noexcept
+{
+    if (polygon.size() < 3U) {
+        return false;
+    }
+    const double x{point.x * millimetres_per_metre};
+    const double z{point.z * millimetres_per_metre};
+    bool inside{};
+    for (std::size_t current{}, previous{polygon.size() - 1U};
+         current < polygon.size(); previous = current++) {
+        const TemplatePoint2 first{polygon[current]};
+        const TemplatePoint2 second{polygon[previous]};
+        const double cross{
+            static_cast<double>(second.x_millimetres - first.x_millimetres)
+                    * (z - first.z_millimetres)
+                - static_cast<double>(second.z_millimetres - first.z_millimetres)
+                    * (x - first.x_millimetres)};
+        const double minimum_x{static_cast<double>(
+            std::min(first.x_millimetres, second.x_millimetres))};
+        const double maximum_x{static_cast<double>(
+            std::max(first.x_millimetres, second.x_millimetres))};
+        const double minimum_z{static_cast<double>(
+            std::min(first.z_millimetres, second.z_millimetres))};
+        const double maximum_z{static_cast<double>(
+            std::max(first.z_millimetres, second.z_millimetres))};
+        if (std::abs(cross) <= comparison_tolerance
+            && x >= minimum_x - comparison_tolerance
+            && x <= maximum_x + comparison_tolerance
+            && z >= minimum_z - comparison_tolerance
+            && z <= maximum_z + comparison_tolerance) {
+            return true;
+        }
+        const bool crosses{(first.z_millimetres > z)
+            != (second.z_millimetres > z)};
+        if (crosses) {
+            const double intersection_x{first.x_millimetres
+                + (z - first.z_millimetres)
+                    * static_cast<double>(second.x_millimetres
+                        - first.x_millimetres)
+                    / static_cast<double>(second.z_millimetres
+                        - first.z_millimetres)};
+            if (x < intersection_x) {
+                inside = !inside;
+            }
+        }
+    }
+    return inside;
+}
+
+[[nodiscard]] bool blocked_by_template_boundary(
+    const CollisionWorld& world,
+    const PlayerCapsule& capsule,
+    const GeometryVector3& feet_position,
+    const CollisionProbe& reachable_support) noexcept
+{
+    return std::any_of(world.chamber_blockers.begin(),
+        world.chamber_blockers.end(), [&](const ChamberBlockerRegion& blocker) {
+            const bool overlaps{feet_position.y + capsule.height_metres
+                    > blocker.minimum_height_metres
+                && feet_position.y < blocker.maximum_height_metres
+                && point_in_polygon(feet_position,
+                    blocker.world_polygon_millimetres)};
+            return overlaps
+                && !(blocker.allows_reachable_support
+                    && reachable_support.supported
+                    && reachable_support.floor_height_metres
+                            + comparison_tolerance
+                        >= blocker.maximum_height_metres);
+        });
 }
 
 struct ClosestRoutePoint {
@@ -195,15 +372,9 @@ struct ClosestRoutePoint {
     const CollisionProbe& current,
     const double feet_height) noexcept
 {
+    static_cast<void>(feet_height);
     if (!current.supported) {
         return true;
-    }
-    const bool candidate_reachable{
-        candidate.floor_height_metres <= feet_height + ground_tolerance_metres};
-    const bool current_reachable{
-        current.floor_height_metres <= feet_height + ground_tolerance_metres};
-    if (candidate_reachable != current_reachable) {
-        return candidate_reachable;
     }
     if (std::abs(candidate.floor_height_metres - current.floor_height_metres)
         > comparison_tolerance) {
@@ -219,6 +390,33 @@ struct ClosestRoutePoint {
     const double maximum_step_up)
 {
     CollisionProbe best;
+    if (!world.chamber_supports.empty()) {
+        for (const ChamberSupportRegion& support : world.chamber_supports) {
+            if (!point_in_polygon(feet_position,
+                    support.world_polygon_millimetres)) {
+                continue;
+            }
+            CollisionProbe candidate{true, support.floor_height_metres,
+                support.ceiling_height_metres, 0.0, GroundContactKind::chamber,
+                support.chamber_id, support.stable_object_id};
+            if (candidate.floor_height_metres > feet_position.y + maximum_step_up
+                || candidate.ceiling_height_metres
+                        - candidate.floor_height_metres
+                    + comparison_tolerance < capsule.height_metres) {
+                continue;
+            }
+            if (better_probe(candidate, best, feet_position.y)) {
+                best = candidate;
+            }
+        }
+        if (blocked_by_template_boundary(
+                world, capsule, feet_position, best)) {
+            return {};
+        }
+        if (best.supported) {
+            return best;
+        }
+    }
     for (const ChamberCollisionRegion& chamber : world.chambers) {
         if (squared_horizontal_distance(feet_position, chamber.center_metres)
             > chamber.usable_radius_metres * chamber.usable_radius_metres) {
@@ -271,7 +469,11 @@ struct ClosestRoutePoint {
                       movement_envelope.minimum_clearance_height_millimetres
                           + movement_envelope.safety_margin_millimetres)
                     / millimetres_per_metre
-                : closest.position.y + route.tunnel_radius_metres};
+                : floor_height
+                    + (route.clearance_height_millimetres > 0
+                            ? route.clearance_height_millimetres
+                                / millimetres_per_metre
+                            : route.tunnel_radius_metres * 2.0)};
         if (floor_height > feet_position.y + maximum_step_up
             || ceiling_height - floor_height + comparison_tolerance
                 < capsule.height_metres) {
@@ -348,6 +550,42 @@ CollisionWorld build_collision_world(const CaveSceneData& scene)
         });
         minimum_floor = std::min(minimum_floor, center.y);
     }
+    for (const CompiledChamberTemplate& chamber : scene.compiled_chambers) {
+        for (const CompiledTemplateFloorPatch& patch : chamber.floor_patches) {
+            if (!patch.walkable) {
+                continue;
+            }
+            world.chamber_supports.push_back({chamber.chamber_id,
+                (static_cast<std::uint64_t>(chamber.chamber_id.value) << 16U)
+                    | (patch.stable_object_id & 0xFFFFULL),
+                patch.world_polygon_millimetres,
+                patch.support_height_millimetres / millimetres_per_metre,
+                (patch.support_height_millimetres
+                    + chamber.usable_height_millimetres)
+                    / millimetres_per_metre,
+                patch.support_priority});
+        }
+        for (const CompiledTemplateBoundaryPatch& patch :
+            chamber.boundary_patches) {
+            const std::uint32_t local_id{
+                static_cast<std::uint32_t>(patch.stable_object_id & 0x00FF'FFFFULL)};
+            if (patch.capsule_blocking && local_id > 4U) {
+                world.chamber_blockers.push_back({patch.stable_object_id,
+                    patch.world_polygon_millimetres,
+                    patch.minimum_y_millimetres / millimetres_per_metre,
+                    patch.maximum_y_millimetres / millimetres_per_metre});
+            }
+        }
+        for (const CompiledTemplateHazardVolume& hazard : chamber.hazards) {
+            world.chamber_hazards.push_back({hazard.stable_object_id,
+                hazard.world_polygon_millimetres,
+                hazard.minimum_y_millimetres / millimetres_per_metre,
+                hazard.maximum_y_millimetres / millimetres_per_metre,
+                hazard.priority});
+            minimum_floor = std::min(minimum_floor,
+                hazard.minimum_y_millimetres / millimetres_per_metre);
+        }
+    }
 
     world.routes.reserve(scene.routes.size());
     for (const RouteGeometryContract& route : scene.routes) {
@@ -358,16 +596,17 @@ CollisionWorld build_collision_world(const CaveSceneData& scene)
                 ? static_cast<double>(route.bridge_width_millimetres)
                         / millimetres_per_metre / 2.0
                     - capsule.radius_metres - safety_margin
-                : route_radius - capsule.radius_metres - safety_margin};
-        std::vector<SplineSample> samples{
-            sample_centripetal_catmull_rom(route.spline)};
+                : static_cast<double>(route.tunnel_clear_width_millimetres)
+                        / millimetres_per_metre / 2.0
+                    - capsule.radius_metres - safety_margin};
+        std::vector<SplineSample> samples{collision_route_samples(scene, route)};
         const std::int32_t clearance_width{route.bridge
                 ? route.bridge_width_millimetres
-                : route.spline.radius_millimetres * 2};
+                : route.tunnel_clear_width_millimetres};
         const std::int32_t clearance_height{route.bridge
                 ? movement_envelope.minimum_clearance_height_millimetres
                     + movement_envelope.safety_margin_millimetres
-                : route.spline.radius_millimetres * 2};
+                : route.tunnel_crown_height_millimetres};
         world.routes.push_back({
             route.edge,
             stable_edge_id(route.edge),
@@ -412,6 +651,24 @@ CollisionWorld build_collision_world(const CaveSceneData& scene)
         return left.stable_object_id < right.stable_object_id;
     };
     std::sort(world.chambers.begin(), world.chambers.end(), chamber_order);
+    std::sort(world.chamber_supports.begin(), world.chamber_supports.end(),
+        [](const ChamberSupportRegion& left, const ChamberSupportRegion& right) {
+            if (left.floor_height_metres != right.floor_height_metres) {
+                return left.floor_height_metres > right.floor_height_metres;
+            }
+            return left.stable_object_id < right.stable_object_id;
+        });
+    std::sort(world.chamber_blockers.begin(), world.chamber_blockers.end(),
+        [](const ChamberBlockerRegion& left, const ChamberBlockerRegion& right) {
+            return left.stable_object_id < right.stable_object_id;
+        });
+    std::sort(world.chamber_hazards.begin(), world.chamber_hazards.end(),
+        [](const ChamberHazardRegion& left, const ChamberHazardRegion& right) {
+            if (left.priority != right.priority) {
+                return left.priority > right.priority;
+            }
+            return left.stable_object_id < right.stable_object_id;
+        });
     std::sort(world.routes.begin(), world.routes.end(), route_order);
     std::sort(world.fall_regions.begin(), world.fall_regions.end(), fall_order);
 
@@ -451,9 +708,6 @@ std::vector<std::string> validate_collision_world(const CollisionWorld& world)
     }
     if (world.routes.empty()) {
         errors.push_back("Collision world requires at least one route region.");
-    }
-    if (world.fall_regions.empty()) {
-        errors.push_back("Collision world requires at least one fall region.");
     }
     if (!std::isfinite(world.kill_plane_metres)) {
         errors.push_back("Collision world kill plane must be finite.");
@@ -498,22 +752,53 @@ std::vector<std::string> validate_collision_world(const CollisionWorld& world)
             }
         }
     }
-    if (!bridge) {
-        errors.push_back("Collision world requires a bridge route.");
+    if (bridge && world.fall_regions.empty()) {
+        errors.push_back(
+            "Collision world requires a fall region when a bridge is present.");
     }
     for (const FallCollisionRegion& fall : world.fall_regions) {
         if (!valid_bounds(fall.bounds)) {
             errors.push_back("Collision world contains invalid fall bounds.");
         }
     }
+    for (const ChamberSupportRegion& support : world.chamber_supports) {
+        if (support.world_polygon_millimetres.size() < 3U
+            || !std::isfinite(support.floor_height_metres)
+            || !std::isfinite(support.ceiling_height_metres)
+            || support.floor_height_metres >= support.ceiling_height_metres) {
+            errors.push_back("Collision world contains an invalid template support.");
+        }
+    }
+    for (const ChamberHazardRegion& hazard : world.chamber_hazards) {
+        if (hazard.world_polygon_millimetres.size() < 3U
+            || hazard.minimum_height_metres >= hazard.maximum_height_metres) {
+            errors.push_back("Collision world contains an invalid template hazard.");
+        }
+    }
     for (const ChamberCollisionRegion& chamber : world.chambers) {
-        const GeometryVector3 respawn{
-            chamber.center_metres.x,
-            chamber.floor_height_metres,
-            chamber.center_metres.z,
-        };
+        const GeometryVector3 respawn{chamber_respawn_position(
+            world, chamber, chamber.center_metres)};
         if (intersects_fall_region(world, respawn)) {
             errors.push_back("Collision world contains an unsafe chamber respawn location.");
+        }
+    }
+    for (const ChamberRespawnPoint& respawn : world.chamber_respawns) {
+        const auto chamber{std::find_if(world.chambers.begin(), world.chambers.end(),
+            [respawn](const ChamberCollisionRegion& candidate) {
+                return candidate.chamber_id == respawn.chamber_id;
+            })};
+        if (chamber == world.chambers.end()
+            || !finite_vector(respawn.feet_position_metres)
+            || intersects_fall_region(world, respawn.feet_position_metres)) {
+            errors.push_back("Collision world contains an invalid authored respawn point.");
+            continue;
+        }
+        const CollisionProbe support{probe_collision_world(
+            world, capsule, respawn.feet_position_metres,
+            movement_envelope.step_height_millimetres / millimetres_per_metre)};
+        if (!support.supported
+            || support.chamber_id != std::optional<NodeId>{respawn.chamber_id}) {
+            errors.push_back("Collision world contains an unsupported authored respawn point.");
         }
     }
     return errors;
@@ -554,7 +839,47 @@ bool intersects_fall_region(
         world.fall_regions.end(),
         [&](const FallCollisionRegion& fall) {
             return point_in_bounds(feet_position_metres, fall.bounds);
-        });
+        })
+        || std::any_of(world.chamber_hazards.begin(),
+            world.chamber_hazards.end(),
+            [&](const ChamberHazardRegion& hazard) {
+                return feet_position_metres.y >= hazard.minimum_height_metres
+                    && feet_position_metres.y <= hazard.maximum_height_metres
+                    && point_in_polygon(feet_position_metres,
+                        hazard.world_polygon_millimetres);
+            });
+}
+
+GeometryVector3 chamber_respawn_position(
+    const CollisionWorld& world,
+    const ChamberCollisionRegion& chamber,
+    const GeometryVector3& reference_position_metres) noexcept
+{
+    GeometryVector3 result{
+        chamber.center_metres.x,
+        chamber.floor_height_metres,
+        chamber.center_metres.z,
+    };
+    double best_distance_squared{std::numeric_limits<double>::infinity()};
+    std::uint64_t best_id{std::numeric_limits<std::uint64_t>::max()};
+    for (const ChamberRespawnPoint& candidate : world.chamber_respawns) {
+        if (candidate.chamber_id != chamber.chamber_id) {
+            continue;
+        }
+        const double dx{candidate.feet_position_metres.x
+            - reference_position_metres.x};
+        const double dz{candidate.feet_position_metres.z
+            - reference_position_metres.z};
+        const double distance_squared{dx * dx + dz * dz};
+        if (distance_squared < best_distance_squared
+            || (distance_squared == best_distance_squared
+                && candidate.stable_object_id < best_id)) {
+            result = candidate.feet_position_metres;
+            best_distance_squared = distance_squared;
+            best_id = candidate.stable_object_id;
+        }
+    }
+    return result;
 }
 
 GroundedController::GroundedController(CollisionWorld world, const PlayerSpawn spawn)
@@ -790,11 +1115,8 @@ void GroundedController::update_safe_chamber(const CollisionProbe& probe)
         return;
     }
     state_.safe_chamber_id = chamber->chamber_id;
-    state_.safe_feet_position_metres = {
-        chamber->center_metres.x,
-        chamber->floor_height_metres,
-        chamber->center_metres.z,
-    };
+    state_.safe_feet_position_metres = chamber_respawn_position(
+        world_, *chamber, state_.feet_position_metres);
 }
 
 void GroundedController::respawn() noexcept

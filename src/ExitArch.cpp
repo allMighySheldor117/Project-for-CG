@@ -13,6 +13,19 @@
 namespace crystalbound {
 namespace {
 
+constexpr double authored_exit_portal_depth_metres{19.68};
+constexpr GeometryVector3 authored_exit_portal_center{0.0, 8.065, 0.0};
+constexpr double authored_exit_portal_radius_x_metres{2.95};
+constexpr double authored_exit_portal_radius_y_metres{2.885};
+constexpr double authored_exit_interaction_inset_metres{0.65};
+constexpr std::array<GeometryVector3, 5> authored_exit_socket_positions{{
+    {3.328698, 9.081559, 0.889999},
+    {-1.854717, 10.968168, 0.889999},
+    {-3.328698, 9.081559, 0.889999},
+    {1.854717, 10.968168, 0.889999},
+    {0.0, 11.5, 0.889999},
+}};
+
 constexpr double pi{3.14159265358979323846};
 constexpr std::uint64_t exit_arch_domain{0x45584954'41524348ULL};
 constexpr std::uint64_t exit_socket_domain{0x534F434B'45540000ULL};
@@ -228,18 +241,25 @@ void append_socket_mount(
 [[nodiscard]] MeshData build_portal_mesh(const ArchBasis& basis)
 {
     MeshBuilder builder;
-    constexpr std::uint32_t side_count{18U};
-    const GeometryVector3 center{0.0, 1.38, -0.32};
+    constexpr std::uint32_t side_count{32U};
     for (std::uint32_t side{}; side < side_count; ++side) {
         const double first_angle{2.0 * pi * side / side_count};
         const double second_angle{2.0 * pi * (side + 1U) / side_count};
-        const GeometryVector3 first{std::cos(first_angle) * 0.98,
-            center.y + std::sin(first_angle) * 1.30, center.z};
-        const GeometryVector3 second{std::cos(second_angle) * 0.98,
-            center.y + std::sin(second_angle) * 1.30, center.z};
-        append_flat_triangle(builder, transform(basis, center),
+        const GeometryVector3 first{
+            authored_exit_portal_center.x
+                + std::cos(first_angle) * authored_exit_portal_radius_x_metres,
+            authored_exit_portal_center.y
+                + std::sin(first_angle) * authored_exit_portal_radius_y_metres,
+            authored_exit_portal_center.z};
+        const GeometryVector3 second{
+            authored_exit_portal_center.x
+                + std::cos(second_angle) * authored_exit_portal_radius_x_metres,
+            authored_exit_portal_center.y
+                + std::sin(second_angle) * authored_exit_portal_radius_y_metres,
+            authored_exit_portal_center.z};
+        append_flat_triangle(builder, transform(basis, authored_exit_portal_center),
             transform(basis, first), transform(basis, second));
-        append_flat_triangle(builder, transform(basis, center),
+        append_flat_triangle(builder, transform(basis, authored_exit_portal_center),
             transform(basis, second), transform(basis, first));
     }
     return builder.finish();
@@ -301,8 +321,9 @@ void append_socket_mount(
         chamber.center_millimetres.x_millimetres / 1'000.0,
         chamber.center_millimetres.y_millimetres / 1'000.0,
         chamber.center_millimetres.z_millimetres / 1'000.0};
-    return {{chamber_center.x + inward.x * 2.0, chamber_center.y,
-                chamber_center.z + inward.z * 2.0},
+    return {{chamber_center.x + inward.x * authored_exit_portal_depth_metres,
+                chamber_center.y,
+                chamber_center.z + inward.z * authored_exit_portal_depth_metres},
         right, front};
 }
 
@@ -390,7 +411,9 @@ ExitArchData build_exit_arch(const CaveGenerationResult& generation)
     ExitArchData arch;
     arch.chamber_id = node.id;
     arch.stable_object_id = exit_arch_domain ^ node.id.value;
-    arch.interaction_position_metres = transform(basis, {0.0, 1.42, 0.42});
+    arch.interaction_position_metres = transform(basis,
+        {authored_exit_portal_center.x, authored_exit_portal_center.y,
+            authored_exit_interaction_inset_metres});
     arch.stone_mesh = build_stone_mesh(basis);
     arch.portal_mesh = build_portal_mesh(basis);
     for (std::size_t index{}; index < elemental_order.size(); ++index) {
@@ -400,7 +423,7 @@ ExitArchData build_exit_arch(const CaveGenerationResult& generation)
         arch.sockets[index] = {element,
             exit_socket_domain ^ (static_cast<std::uint64_t>(node.id.value) << 16U)
                 ^ static_cast<std::uint64_t>(index),
-            transform(basis, socket_local_position(index)),
+            transform(basis, authored_exit_socket_positions[index]),
             elemental.socket_crystal_mesh,
             elemental.persona.albedo,
             elemental.persona.emission,

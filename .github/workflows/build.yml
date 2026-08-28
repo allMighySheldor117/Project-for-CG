@@ -54,12 +54,17 @@ jobs:
       - name: Build
         run: >-
           cmake --build build/ci-windows --config Debug
-          --target crystalbound crystalbound_tests
+          --target crystalbound crystalbound_tests crystalbound_seed_corpus
 
       - name: Test
         run: >-
           ctest --test-dir build/ci-windows -C Debug
           --output-on-failure
+
+      - name: Validate 256 deterministic requested seeds
+        run: >-
+          .\build\ci-windows\Debug\crystalbound_seed_corpus.exe
+          --count 256
 
       - name: Install
         run: >-
@@ -94,12 +99,17 @@ jobs:
       - name: Build
         run: >-
           cmake --build build/ci-linux
-          --target crystalbound crystalbound_tests
+          --target crystalbound crystalbound_tests crystalbound_seed_corpus
 
       - name: Test
         run: >-
           ctest --test-dir build/ci-linux
           --output-on-failure
+
+      - name: Validate 256 deterministic requested seeds
+        run: >-
+          ./build/ci-linux/crystalbound_seed_corpus
+          --count 256
 
       - name: Install
         run: >-

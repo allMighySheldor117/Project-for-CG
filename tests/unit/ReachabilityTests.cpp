@@ -682,14 +682,14 @@ void reference_golden_seeds_hold(const std::filesystem::path&)
     const CaveGenerationResult reference{generate_cave({123'456'789U})};
     require(!accepted.generation.used_fallback, "seed 42 no longer accepts normally");
     require(
-        accepted.scene.fingerprint == 0x1F8517F2C8D6C15AULL,
+        accepted.scene.fingerprint == 0x52CCEB23A788803DULL,
         "seed 42 scene fingerprint changed");
     require(
         !reference.generation.used_fallback
             && reference.generation.attempt_seed == Seed{123'456'789U}
             && reference.generation.effective_seed == Seed{123'456'789U}
             && reference.generation.diagnostics.size() == 1U
-            && reference.scene.fingerprint == 0x52F9039C6BAA9835ULL,
+            && reference.scene.fingerprint == 0x2489A9BDA8738BB0ULL,
         "reference seed contract changed");
 }
 

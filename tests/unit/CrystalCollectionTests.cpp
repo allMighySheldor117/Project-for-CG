@@ -558,7 +558,7 @@ void structural_and_seed_contracts_are_preserved(const std::filesystem::path&)
 {
     const CaveGenerationResult first{generate_cave({42U})};
     const CaveGenerationResult repeat{generate_cave({42U})};
-    require(first.scene.fingerprint == 0x1F8517F2C8D6C15AULL,
+    require(first.scene.fingerprint == 0x52CCEB23A788803DULL,
         "structural cave fingerprint changed");
     require(first.scene.fingerprint == repeat.scene.fingerprint
             && first.generation.fingerprint == repeat.generation.fingerprint,

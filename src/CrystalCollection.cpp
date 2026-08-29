@@ -449,11 +449,17 @@ FocusedCrystalResult focus_crystal(
     const std::vector<CrystalInteractionTarget>& targets,
     const CameraInteractionQuery& query,
     const VisibilityWorld& visibility,
-    const CrystalCollectionState& collection) noexcept
+    const CrystalCollectionState& collection,
+    const InteractionFocusLimits limits) noexcept
 {
     const std::optional<GeometryVector3> camera_forward{
         normalized(query.forward)};
-    if (!finite(query.origin_metres) || !camera_forward.has_value()) {
+    if (!finite(query.origin_metres) || !camera_forward.has_value()
+        || !std::isfinite(limits.maximum_range_metres)
+        || limits.maximum_range_metres <= 0.0
+        || !std::isfinite(limits.maximum_angle_degrees)
+        || limits.maximum_angle_degrees < 0.0
+        || limits.maximum_angle_degrees > 180.0) {
         return {{}, InteractionRejectionReason::invalid_query};
     }
 
@@ -463,7 +469,7 @@ FocusedCrystalResult focus_crystal(
     bool saw_outside_focus{};
     bool saw_occluded{};
     const double minimum_dot{
-        std::cos(maximum_crystal_focus_angle_degrees * pi / 180.0)};
+        std::cos(limits.maximum_angle_degrees * pi / 180.0)};
     for (const CrystalInteractionTarget& candidate : targets) {
         if (!finite(candidate.position_metres)
             || candidate.stable_object_id == 0U) {
@@ -479,8 +485,7 @@ FocusedCrystalResult focus_crystal(
         if (!std::isfinite(distance) || distance <= numeric_epsilon) {
             return {{}, InteractionRejectionReason::invalid_query};
         }
-        if (distance
-            > maximum_crystal_interaction_range_metres + numeric_epsilon) {
+        if (distance > limits.maximum_range_metres + numeric_epsilon) {
             saw_out_of_range = true;
             continue;
         }

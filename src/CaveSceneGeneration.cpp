@@ -14,6 +14,7 @@
 #include "GeometryMath.hpp"
 #include "crystalbound/AuthoredChamber.hpp"
 #include "crystalbound/DeterministicRandom.hpp"
+#include "crystalbound/MazeGeneration.hpp"
 
 namespace crystalbound {
 namespace {
@@ -35,6 +36,7 @@ constexpr std::uint64_t tunnel_piece_domain{0x3000'0000'0000'0000ULL};
 constexpr std::uint64_t junction_piece_domain{0x4000'0000'0000'0000ULL};
 constexpr std::uint64_t bridge_piece_domain{0x5000'0000'0000'0000ULL};
 constexpr std::uint64_t natural_formation_domain{0x6000'0000'0000'0000ULL};
+constexpr std::uint64_t maze_wall_domain{0x7000'0000'0000'0000ULL};
 
 struct IntegerDirection2 {
     std::int32_t x{};
@@ -1229,6 +1231,7 @@ CaveSceneData build_cave_scene(
             descriptor, scene.portals, scene.bridge_routes, effective_seed));
     }
     validate_route_spatial_separation(scene.routes, scene.chambers);
+    scene.maze_rooms = build_maze_rooms(topology, scene.routes, effective_seed);
 
     for (const ChamberGeometryContract& chamber : scene.chambers) {
         const auto compiled{std::find_if(scene.compiled_chambers.begin(),
@@ -1313,16 +1316,28 @@ CaveSceneData build_cave_scene(
 
     for (const RouteGeometryContract& route : scene.routes) {
         if (!route.bridge) {
-            MeshData tunnel{build_horseshoe_tunnel(route)};
-            const AxisAlignedBounds tunnel_bounds{mesh_bounds(tunnel)};
-            scene.colliders.push_back({
-                ColliderKind::tunnel,
-                tunnel_piece_domain ^ stable_edge_id(route.edge),
-                tunnel_bounds,
-            });
-            append_piece(scene, ScenePieceKind::tunnel,
-                tunnel_piece_domain ^ stable_edge_id(route.edge),
-                std::move(tunnel), {0.33F, 0.36F, 0.41F});
+            const MazeRoomContract* maze{maze_room_for_route(scene.maze_rooms, route.edge)};
+            if (maze == nullptr) {
+                MeshData tunnel{build_horseshoe_tunnel(route)};
+                const AxisAlignedBounds tunnel_bounds{mesh_bounds(tunnel)};
+                scene.colliders.push_back({ColliderKind::tunnel,
+                    tunnel_piece_domain ^ stable_edge_id(route.edge), tunnel_bounds});
+                append_piece(scene, ScenePieceKind::tunnel,
+                    tunnel_piece_domain ^ stable_edge_id(route.edge),
+                    std::move(tunnel), {0.33F, 0.36F, 0.41F});
+            } else {
+                std::array<RouteGeometryContract, 2> segments{
+                    maze_tunnel_segments(route, *maze)};
+                for (std::size_t index{}; index < segments.size(); ++index) {
+                    MeshData tunnel{build_horseshoe_tunnel(segments[index])};
+                    const std::uint64_t object_id{tunnel_piece_domain
+                        ^ stable_edge_id(route.edge) ^ (index + 1U)};
+                    scene.colliders.push_back({ColliderKind::tunnel,
+                        object_id, mesh_bounds(tunnel)});
+                    append_piece(scene, ScenePieceKind::tunnel, object_id,
+                        std::move(tunnel), {0.33F, 0.36F, 0.41F});
+                }
+            }
         }
 
         if (route.bridge) {
@@ -1396,6 +1411,13 @@ CaveSceneData build_cave_scene(
             }
         }
         elemental_spatial.push_back(std::move(spatial));
+    }
+
+    for (const MazeRoomContract& maze : scene.maze_rooms) {
+        append_piece(scene, ScenePieceKind::maze_wall,
+            maze_wall_domain ^ stable_edge_id(maze.route),
+            build_maze_wall_mesh(maze), {0.27F, 0.29F, 0.32F},
+            MaterialKind::rock);
     }
     scene.elemental_visuals = build_elemental_scene(
         topology, effective_seed, elemental_spatial);

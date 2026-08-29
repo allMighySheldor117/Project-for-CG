@@ -501,7 +501,8 @@ ExitFocusResult focus_exit_arch(
         Element::fire, arch.stable_object_id, arch.interaction_position_metres};
     const CrystalCollectionState empty_collection;
     const FocusedCrystalResult focused{
-        focus_crystal({target}, query, visibility, empty_collection)};
+        focus_crystal({target}, query, visibility, empty_collection,
+            exit_arch_interaction_focus_limits)};
     if (!focused.focused.has_value()) {
         return {{}, map_rejection(focused.rejection)};
     }

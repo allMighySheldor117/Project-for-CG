@@ -276,7 +276,7 @@ void same_seed_repeats_complete_result(const std::filesystem::path&)
 void fixed_seed_matches_golden_fingerprint(const std::filesystem::path&)
 {
     const GenerationResult result{generate_topology({123456789U})};
-    constexpr std::uint64_t expected_fingerprint{0x93D42AEFF939F0CBULL};
+    constexpr std::uint64_t expected_fingerprint{0xB7957838D01E8DA5ULL};
     require(
         result.fingerprint == expected_fingerprint,
         "fixed topology fingerprint changed; actual="
@@ -857,11 +857,11 @@ void fixed_linear_layout_matches_exported_plan(const std::filesystem::path&)
     const std::array<ExpectedNode, 7U> expected{{
         {ChamberRole::start, std::nullopt, {0, 0, 0, 90'000}},
         {ChamberRole::elemental, Element::fire, {0, -850, 110'000, 270'000}},
-        {ChamberRole::elemental, Element::air, {100'000, 0, 110'000, 90'000}},
-        {ChamberRole::elemental, Element::earth, {205'000, 0, 110'000, 180'000}},
-        {ChamberRole::elemental, Element::water, {205'000, -1'650, 20'000, 270'000}},
-        {ChamberRole::elemental, Element::aether, {315'000, 0, 20'000, 0}},
-        {ChamberRole::exit, std::nullopt, {415'000, 0, 20'000, 0}},
+        {ChamberRole::elemental, Element::air, {110'000, 0, 110'000, 90'000}},
+        {ChamberRole::elemental, Element::earth, {215'000, 0, 110'000, 180'000}},
+        {ChamberRole::elemental, Element::water, {215'000, -1'650, 8'000, 270'000}},
+        {ChamberRole::elemental, Element::aether, {325'000, 0, 8'000, 0}},
+        {ChamberRole::exit, std::nullopt, {425'000, 0, 8'000, 0}},
     }};
     const std::vector<Edge> expected_edges{
         make_edge({0U}, {1U}), make_edge({1U}, {2U}),

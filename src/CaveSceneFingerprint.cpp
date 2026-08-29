@@ -12,7 +12,7 @@ namespace {
 
 constexpr std::uint64_t fnv_offset_basis{14695981039346656037ULL};
 constexpr std::uint64_t fnv_prime{1099511628211ULL};
-constexpr std::uint32_t cave_scene_contract_version{2U};
+constexpr std::uint32_t cave_scene_contract_version{3U};
 
 template <typename Integer>
 void append_little_endian(std::vector<std::uint8_t>& bytes, const Integer value)
@@ -143,6 +143,31 @@ std::uint64_t cave_scene_fingerprint(
         append_little_endian(bytes, route.join_overlap_millimetres);
         append_little_endian(bytes, route.bridge_width_millimetres);
         append_little_endian(bytes, route.bridge_rail_height_millimetres);
+    }
+    append_little_endian(bytes, static_cast<std::uint32_t>(scene.maze_rooms.size()));
+    for (const MazeRoomContract& room : scene.maze_rooms) {
+        append_edge(bytes, room.route);
+        append_little_endian(bytes, room.ordinal);
+        append_point(bytes, room.floor_center_millimetres);
+        append_little_endian(bytes, room.forward_x_milli);
+        append_little_endian(bytes, room.forward_z_milli);
+        append_little_endian(bytes, room.columns);
+        append_little_endian(bytes, room.rows);
+        append_little_endian(bytes, static_cast<std::uint32_t>(room.walls.size()));
+        for (const MazeWallContract& wall : room.walls) {
+            append_little_endian(bytes, wall.stable_object_id);
+            append_little_endian(bytes, static_cast<std::uint8_t>(wall.direction));
+            append_little_endian(bytes, wall.center_x_millimetres);
+            append_little_endian(bytes, wall.center_z_millimetres);
+            append_little_endian(bytes, wall.length_millimetres);
+        }
+        append_little_endian(bytes,
+            static_cast<std::uint32_t>(room.solution_cells.size()));
+        for (const MazeCellCoordinate cell : room.solution_cells) {
+            append_little_endian(bytes, cell.column);
+            append_little_endian(bytes, cell.row);
+        }
+        append_little_endian(bytes, room.fingerprint);
     }
     return fnv1a(bytes);
 }

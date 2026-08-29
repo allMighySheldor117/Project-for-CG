@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "crystalbound/AuthoredChamber.hpp"
+#include "crystalbound/MazeGeneration.hpp"
 #include "crystalbound/PlayerController.hpp"
 
 namespace crystalbound::test {
@@ -420,6 +421,61 @@ void generated_scene_produces_valid_collision(const std::filesystem::path&)
         "generated bridge portal has no safe grounded chamber-side transform"};
 }
 
+[[nodiscard]] std::vector<GeometryVector3> generated_route_waypoints(
+    const CaveGenerationResult& generation,
+    const RouteCollisionRegion& collision_route,
+    const bool reverse)
+{
+    const auto scene_route{std::find_if(generation.scene.routes.begin(),
+        generation.scene.routes.end(),
+        [&](const RouteGeometryContract& candidate) {
+            return candidate.edge == collision_route.edge;
+        })};
+    require(scene_route != generation.scene.routes.end(),
+        "collision route has no matching scene route");
+
+    std::vector<GeometryVector3> waypoints;
+    const auto append_samples = [&](const RouteGeometryContract& segment,
+                                    const bool reverse_segment) {
+        std::vector<SplineSample> samples{
+            sample_centripetal_catmull_rom(segment.spline)};
+        if (reverse_segment) {
+            std::reverse(samples.begin(), samples.end());
+        }
+        for (const SplineSample& sample : samples) {
+            waypoints.push_back({sample.position_metres.x,
+                sample.position_metres.y
+                    - collision_route.tunnel_radius_metres,
+                sample.position_metres.z});
+        }
+    };
+
+    const MazeRoomContract* maze{
+        maze_room_for_route(generation.scene.maze_rooms, collision_route.edge)};
+    if (maze == nullptr) {
+        append_samples(*scene_route, reverse);
+        return waypoints;
+    }
+
+    const std::array<RouteGeometryContract, 2> segments{
+        maze_tunnel_segments(*scene_route, *maze)};
+    if (!reverse) {
+        append_samples(segments[0], false);
+        for (const MazeCellCoordinate cell : maze->solution_cells) {
+            waypoints.push_back(maze_cell_center_metres(*maze, cell));
+        }
+        append_samples(segments[1], false);
+    } else {
+        append_samples(segments[1], true);
+        for (auto cell = maze->solution_cells.rbegin();
+             cell != maze->solution_cells.rend(); ++cell) {
+            waypoints.push_back(maze_cell_center_metres(*maze, *cell));
+        }
+        append_samples(segments[0], true);
+    }
+    return waypoints;
+}
+
 void traverse_generated_route(
     const CaveGenerationResult& generation,
     const CollisionWorld& world,
@@ -443,17 +499,8 @@ void traverse_generated_route(
     const GeometryVector3 destination{portal_safe_position(
         world, destination_portal, collision_chamber(world, destination_id))};
 
-    std::vector<GeometryVector3> waypoints;
-    waypoints.reserve(route.samples.size() + 1U);
-    if (reverse) {
-        for (auto sample{route.samples.rbegin()}; sample != route.samples.rend(); ++sample) {
-            waypoints.push_back(sample->position_metres);
-        }
-    } else {
-        for (const SplineSample& sample : route.samples) {
-            waypoints.push_back(sample.position_metres);
-        }
-    }
+    std::vector<GeometryVector3> waypoints{
+        generated_route_waypoints(generation, route, reverse)};
     waypoints.push_back(destination);
 
     GroundedController controller{world, {start, start_id}};
@@ -587,11 +634,8 @@ void generated_seed_42_tunnels_have_continuous_support(
                 && route.directed[1].junction_to_route_supported
                 && route.directed[1].route_to_chamber_supported,
             "seed 42 tunnel has an unsupported endpoint seam");
-        for (const SplineSample& sample : route.samples) {
-            const GeometryVector3 feet{
-                sample.position_metres.x,
-                sample.position_metres.y - route.tunnel_radius_metres,
-                sample.position_metres.z};
+        for (const GeometryVector3 feet
+            : generated_route_waypoints(generation, route, false)) {
             require(std::abs(feet.y) < tolerance,
                 "seed 42 tunnel support changes floor elevation");
             require(probe_collision_world(

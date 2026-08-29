@@ -1,4 +1,5 @@
 #include "crystalbound/CaveScene.hpp"
+#include "crystalbound/MazeGeneration.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -294,11 +295,13 @@ void validate_meshes_and_budgets(
             [](const SceneCollider& collider) {
                 return collider.kind == ColliderKind::tunnel;
             }))};
-    if (tunnel_mesh_count + scene.bridge_routes.size() != scene.routes.size()
+    const std::size_t expected_tunnel_count{
+        scene.routes.size() - scene.bridge_routes.size() + scene.maze_rooms.size()};
+    if (tunnel_mesh_count != expected_tunnel_count
         || tunnel_collider_count != tunnel_mesh_count
         || bridge_mesh_count != scene.bridge_routes.size()) {
         errors.push_back(
-            "Bridge routes emit a tunnel mesh, collider, support, or roof.");
+            "Route and maze tunnel meshes disagree with their collider contract.");
     }
     if (vertex_count != scene.static_vertex_count
         || vertex_count > geometry_budgets.maximum_static_vertices) {
@@ -355,6 +358,9 @@ std::vector<std::string> validate_cave_scene(
     errors.insert(errors.end(), compiled_errors.begin(), compiled_errors.end());
     validate_chambers(topology, scene, errors);
     validate_routes(topology, scene, errors);
+    const std::vector<std::string> maze_errors{
+        validate_maze_rooms(topology, scene.routes, scene.maze_rooms)};
+    errors.insert(errors.end(), maze_errors.begin(), maze_errors.end());
     validate_meshes_and_budgets(scene, errors);
     validate_colliders(scene, errors);
     const std::vector<std::string> elemental_errors{

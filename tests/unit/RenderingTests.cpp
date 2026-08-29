@@ -460,13 +460,13 @@ void fixed_layout_seed_contracts_remain_unchanged(const std::filesystem::path&)
     const CaveGenerationResult accepted{generate_cave({42U})};
     const CaveGenerationResult reference{generate_cave({123'456'789U})};
     require(!accepted.generation.used_fallback
-            && accepted.scene.fingerprint == 0x1F8517F2C8D6C15AULL
+            && accepted.scene.fingerprint == 0x52CCEB23A788803DULL
             && accepted.reachability.accepted,
         "seed 42 fixed-layout acceptance changed");
     require(!reference.generation.used_fallback
             && reference.generation.effective_seed == Seed{123'456'789U}
             && reference.generation.diagnostics.size() == 1U
-            && reference.scene.fingerprint == 0x52F9039C6BAA9835ULL
+            && reference.scene.fingerprint == 0x2489A9BDA8738BB0ULL
             && reference.reachability.accepted,
         "reference fixed-layout acceptance changed");
 }

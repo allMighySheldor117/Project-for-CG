@@ -388,26 +388,45 @@ void exit_range_and_focus_boundaries_are_locked(const std::filesystem::path&)
     }
     require(attempt_exit_arch(arch,
                 query_toward(arch.interaction_position_metres,
-                    maximum_crystal_interaction_range_metres),
+                    exit_arch_interaction_focus_limits.maximum_range_metres),
                 {}, true, true, collection).completed,
         "exact exit range boundary was rejected");
     require(attempt_exit_arch(arch,
                 query_toward(arch.interaction_position_metres,
-                    maximum_crystal_interaction_range_metres + 1.0e-5),
+                    exit_arch_interaction_focus_limits.maximum_range_metres
+                        + 1.0e-5),
                 {}, true, true, collection)
                 .rejection == ExitRejectionReason::out_of_range,
         "exit beyond range boundary was accepted");
     require(attempt_exit_arch(arch,
                 query_toward(arch.interaction_position_metres, 2.0,
-                    maximum_crystal_focus_angle_degrees),
+                    exit_arch_interaction_focus_limits.maximum_angle_degrees),
                 {}, true, true, collection).completed,
         "exact exit focus boundary was rejected");
     require(attempt_exit_arch(arch,
                 query_toward(arch.interaction_position_metres, 2.0,
-                    maximum_crystal_focus_angle_degrees + 0.001),
+                    exit_arch_interaction_focus_limits.maximum_angle_degrees
+                        + 0.001),
                 {}, true, true, collection)
                 .rejection == ExitRejectionReason::outside_focus,
         "exit beyond focus boundary was accepted");
+}
+
+void expanded_exit_interaction_is_player_friendly(const std::filesystem::path&)
+{
+    const ExitArchData arch{build_exit_arch(generate_cave({42U}))};
+    CrystalCollectionState collection;
+    for (const Element element : elemental_order) {
+        require(collection.collect(element), "test collection failed");
+    }
+    require(attempt_exit_arch(arch,
+                query_toward(arch.interaction_position_metres, 3.0),
+                {}, true, true, collection).completed,
+        "final portal cannot be activated from three metres away");
+    require(attempt_exit_arch(arch,
+                query_toward(arch.interaction_position_metres, 2.0, 24.0),
+                {}, true, true, collection).completed,
+        "final portal interaction still requires overly precise aiming");
 }
 
 void invalid_exit_query_is_rejected(const std::filesystem::path&)
@@ -430,7 +449,7 @@ void step_nine_preserves_structural_contracts(const std::filesystem::path&)
     const CaveGenerationResult first{generate_cave({42U})};
     static_cast<void>(build_exit_arch(first));
     const CaveGenerationResult repeat{generate_cave({42U})};
-    require(first.scene.fingerprint == 0x1F8517F2C8D6C15AULL
+    require(first.scene.fingerprint == 0x52CCEB23A788803DULL
             && first.scene.fingerprint == repeat.scene.fingerprint,
         "exit arch changed the structural cave fingerprint");
     require(first.generation.fingerprint == repeat.generation.fingerprint
@@ -457,6 +476,8 @@ std::vector<TestCase> game_loop_test_cases()
         {"socket display supports every collection order", socket_display_tracks_any_collection_order},
         {"exit gating requires the full interaction contract", exit_requires_playing_collection_focus_los_and_edge},
         {"exit range and focus boundaries are locked", exit_range_and_focus_boundaries_are_locked},
+        {"expanded exit interaction is player friendly",
+            expanded_exit_interaction_is_player_friendly},
         {"invalid exit query is rejected", invalid_exit_query_is_rejected},
         {"Step 9 preserves structural contracts", step_nine_preserves_structural_contracts},
     };

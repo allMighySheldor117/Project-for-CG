@@ -180,12 +180,12 @@ TopologyData generate_topology_attempt(const Seed attempt_seed)
     const std::array<Anchor, 7U> fixed_anchors{{
         {0, 0, 0, 90'000},
         {0, -authored_fire_landing_height_millimetres, 110'000, 270'000},
-        {100'000, 0, 110'000, 90'000},
-        {205'000, 0, 110'000, 180'000},
-        {205'000, -authored_water_landing_height_millimetres,
-            20'000, 270'000},
-        {315'000, 0, 20'000, 0},
-        {415'000, 0, 20'000, 0},
+        {110'000, 0, 110'000, 90'000},
+        {215'000, 0, 110'000, 180'000},
+        {215'000, -authored_water_landing_height_millimetres,
+            8'000, 270'000},
+        {325'000, 0, 8'000, 0},
+        {425'000, 0, 8'000, 0},
     }};
     for (std::size_t index{}; index < topology.nodes.size(); ++index) {
         topology.nodes[index].anchor = fixed_anchors[index];
@@ -216,12 +216,12 @@ TopologyData known_good_fallback_topology()
         Anchor{0, 0, 0, 90'000},
         Anchor{0, -authored_fire_landing_height_millimetres,
             110'000, 270'000},
-        Anchor{100'000, 0, 110'000, 90'000},
-        Anchor{205'000, 0, 110'000, 180'000},
-        Anchor{205'000, -authored_water_landing_height_millimetres,
-            20'000, 270'000},
-        Anchor{315'000, 0, 20'000, 0},
-        Anchor{415'000, 0, 20'000, 0},
+        Anchor{110'000, 0, 110'000, 90'000},
+        Anchor{215'000, 0, 110'000, 180'000},
+        Anchor{215'000, -authored_water_landing_height_millimetres,
+            8'000, 270'000},
+        Anchor{325'000, 0, 8'000, 0},
+        Anchor{425'000, 0, 8'000, 0},
     };
 
     TopologyData topology;

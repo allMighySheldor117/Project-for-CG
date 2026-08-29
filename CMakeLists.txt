@@ -99,6 +99,7 @@ add_library(crystalbound_core STATIC
     src/GeometryMesh.cpp
     src/GeometryValidation.cpp
     src/MeshData.cpp
+    src/MazeGeneration.cpp
     src/ObjLoader.cpp
     src/PlayerController.cpp
     src/ProfileTraversal.cpp
@@ -280,6 +281,30 @@ if(CRYSTALBOUND_BUILD_TESTS)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/ElementalCrystal.mtl"
                 "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/ElementalCrystal.mtl"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/MazeRoom.obj"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/MazeRoom.obj"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/MazeRoom.mtl"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/MazeRoom.mtl"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/MazeWall.obj"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/MazeWall.obj"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/MazeWall.mtl"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/MazeWall.mtl"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/MazePillar.obj"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/MazePillar.obj"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/MazePillar.mtl"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/MazePillar.mtl"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/MazeArch.obj"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/MazeArch.obj"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/MazeArch.mtl"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/MazeArch.mtl"
        COMMENT "Copying Crystalbound test fixtures"
         VERBATIM
     )

@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "crystalbound/CaveScene.hpp"
+#include "crystalbound/MazeGeneration.hpp"
 #include "crystalbound/PlayerController.hpp"
 
 namespace crystalbound::test {
@@ -90,7 +91,7 @@ void fixed_seed_builds_complete_scene(const std::filesystem::path&)
     require(result.scene.bridge_routes.empty(), "fixed layout unexpectedly generated a bridge");
     require(result.scene.static_vertex_count > 0U, "fixed seed generated no vertices");
     require(
-        format_fingerprint(result.scene.fingerprint) == "1f8517f2c8d6c15a",
+        format_fingerprint(result.scene.fingerprint) == "52cceb23a788803d",
         "canonical authored scene fingerprint changed");
 }
 
@@ -487,8 +488,8 @@ void every_fixed_route_emits_one_tunnel(const std::filesystem::path&)
             }))};
     require(result.scene.bridge_routes.empty(),
         "fixed layout selected a bridge route");
-    require(tunnel_count == result.scene.routes.size(),
-        "a fixed route did not emit exactly one tunnel mesh");
+    require(tunnel_count == result.scene.routes.size() + result.scene.maze_rooms.size(),
+        "maze routes did not emit two tightly joined tunnel segments");
     require(tunnel_collider_count == tunnel_count,
         "a fixed route did not emit exactly one tunnel collider");
 }
@@ -883,6 +884,246 @@ void exported_layout_uses_six_flat_tunnels_and_no_bridges(
     }
 }
 
+void fixed_layout_inserts_exactly_five_maze_rooms(
+    const std::filesystem::path&)
+{
+    const CaveGenerationResult result{generate_cave({42U})};
+    const CaveGenerationResult repeated{generate_cave({42U})};
+    const CaveGenerationResult alternate{generate_cave({43U})};
+    require(result.scene.maze_rooms.size() == fixed_maze_room_count,
+        "fixed route must insert exactly five maze rooms");
+    require(result.scene.routes.size() == fixed_maze_room_count + 1U,
+        "maze-room contract requires six fixed route legs");
+    for (std::size_t index{}; index < result.scene.maze_rooms.size(); ++index) {
+        const MazeRoomContract& room{result.scene.maze_rooms[index]};
+        require(room.route == result.scene.routes[index].edge,
+            "maze room is not assigned to its ordered route leg");
+        require(room.ordinal == index
+                && room.columns == maze_grid_columns
+                && room.rows == maze_grid_rows,
+            "maze room grid contract changed");
+        require(!room.walls.empty(), "maze room contains no generated walls");
+        require(room.fingerprint == repeated.scene.maze_rooms[index].fingerprint,
+            "same seed changed a maze layout");
+        require(!room.solution_cells.empty()
+                && room.solution_cells.front()
+                    == MazeCellCoordinate{maze_grid_columns / 2U, maze_grid_rows - 1U}
+                && room.solution_cells.back()
+                    == MazeCellCoordinate{maze_grid_columns / 2U, 0U},
+            "maze room has no south-door to north-door solution");
+        const auto segments{maze_tunnel_segments(result.scene.routes[index], room)};
+        const IntegerPoint3 expected_first{maze_local_to_world(room, 0,
+            result.scene.routes[index].spline.radius_millimetres,
+            maze_room_connector_half_length_millimetres
+                - maze_tunnel_overlap_millimetres)};
+        const IntegerPoint3 expected_second{maze_local_to_world(room, 0,
+            result.scene.routes[index].spline.radius_millimetres,
+            -maze_room_connector_half_length_millimetres
+                + maze_tunnel_overlap_millimetres)};
+        require(segments[0].spline.control_points.back() == expected_first
+                && segments[1].spline.control_points.front() == expected_second,
+            "maze tunnel does not overlap both connector floors by exactly 100 mm");
+        const auto axis_distance = [](const IntegerPoint3& first,
+                                       const IntegerPoint3& second) {
+            const std::int64_t dx{
+                static_cast<std::int64_t>(second.x_millimetres)
+                    - first.x_millimetres};
+            const std::int64_t dz{
+                static_cast<std::int64_t>(second.z_millimetres)
+                    - first.z_millimetres};
+            return std::max(dx < 0 ? -dx : dx, dz < 0 ? -dz : dz);
+        };
+        require(axis_distance(segments[0].spline.control_points.front(),
+                    segments[0].spline.control_points.back())
+                    - maze_tunnel_overlap_millimetres
+                >= maze_minimum_tunnel_run_millimetres
+                && axis_distance(segments[1].spline.control_points.front(),
+                       segments[1].spline.control_points.back())
+                        - maze_tunnel_overlap_millimetres
+                    >= maze_minimum_tunnel_run_millimetres,
+            "maze room leaves too little visible tunnel beside a chamber");
+    }
+    require(std::any_of(result.scene.maze_rooms.begin(), result.scene.maze_rooms.end(),
+                [&](const MazeRoomContract& room) {
+                    const MazeRoomContract& other{
+                        alternate.scene.maze_rooms[room.ordinal]};
+                    return room.fingerprint != other.fingerprint;
+                }),
+        "different seeds did not vary any maze layout");
+    require(std::none_of(result.scene.maze_rooms.begin(),
+                result.scene.maze_rooms.end(),
+                [&](const MazeRoomContract& room) {
+                    return room.route == result.scene.routes.back().edge;
+                }),
+        "Aether-to-Exit route must not contain a sixth maze room");
+}
+
+void generated_maze_authored_instances_follow_walls_and_thresholds(
+    const std::filesystem::path&)
+{
+    const CaveGenerationResult result{generate_cave({42U})};
+    const CollisionWorld collision{build_collision_world(result.scene)};
+    const PlayerCapsule capsule{locked_player_capsule()};
+    for (const MazeRoomContract& room : result.scene.maze_rooms) {
+        const std::vector<MazeAuthoredModelInstance> instances{
+            maze_authored_model_instances(room)};
+        require(!instances.empty(),
+            "generated maze has no authored model instances");
+        const std::size_t wall_count{static_cast<std::size_t>(std::count_if(
+            instances.begin(), instances.end(), [](const auto& instance) {
+                return instance.kind == MazeAuthoredModelKind::wall;
+            }))};
+        const std::size_t pillar_count{static_cast<std::size_t>(std::count_if(
+            instances.begin(), instances.end(), [](const auto& instance) {
+                return instance.kind == MazeAuthoredModelKind::pillar;
+            }))};
+        const std::size_t arch_count{static_cast<std::size_t>(std::count_if(
+            instances.begin(), instances.end(), [](const auto& instance) {
+                return instance.kind == MazeAuthoredModelKind::arch;
+            }))};
+        require(wall_count == room.walls.size(),
+            "every generated maze wall must receive one authored wall model");
+        require(pillar_count > 0U,
+            "generated maze wall endpoints must receive authored pillars");
+        require(arch_count == 2U,
+            "each maze room must receive one authored arch at each threshold");
+
+        std::set<std::uint64_t> stable_ids;
+        std::set<std::pair<std::int32_t, std::int32_t>> pillar_centers;
+        std::set<std::int32_t> arch_thresholds;
+        for (const MazeAuthoredModelInstance& instance : instances) {
+            require(stable_ids.insert(instance.stable_object_id).second,
+                "authored maze model instance IDs must be unique");
+            require(instance.local_yaw_quarter_turns < 4U,
+                "authored maze model yaw must use a canonical quarter turn");
+            if (instance.kind == MazeAuthoredModelKind::wall) {
+                const auto wall{std::find_if(room.walls.begin(), room.walls.end(),
+                    [&](const MazeWallContract& candidate) {
+                        return candidate.stable_object_id
+                            == instance.stable_object_id;
+                    })};
+                require(wall != room.walls.end()
+                        && wall->center_x_millimetres
+                            == instance.center_x_millimetres
+                        && wall->center_z_millimetres
+                            == instance.center_z_millimetres
+                        && wall->length_millimetres
+                            == instance.target_length_millimetres,
+                    "authored wall model drifted from its collision wall");
+                const MazeAuthoredModelPlacement placement{
+                    maze_authored_model_placement(room, instance)};
+                const IntegerPoint3 expected{maze_local_to_world(room,
+                    instance.center_x_millimetres, 0,
+                    instance.center_z_millimetres)};
+                require(std::abs(placement.translation_metres.x
+                            - expected.x_millimetres / 1'000.0)
+                            <= 0.000'001
+                        && std::abs(placement.translation_metres.y
+                            - expected.y_millimetres / 1'000.0)
+                            <= 0.000'001
+                        && std::abs(placement.translation_metres.z
+                            - expected.z_millimetres / 1'000.0)
+                            <= 0.000'001
+                        && std::abs(placement.scale.x
+                            - instance.target_length_millimetres / 4'000.0)
+                            <= 0.000'001,
+                    "authored wall world transform drifted from generation");
+                require(!probe_collision_world(collision, capsule,
+                            placement.translation_metres, 0.30)
+                            .supported,
+                    "authored maze wall can be walked through");
+            } else if (instance.kind == MazeAuthoredModelKind::pillar) {
+                require(instance.target_length_millimetres == 0
+                        && pillar_centers.insert({instance.center_x_millimetres,
+                            instance.center_z_millimetres}).second,
+                    "authored maze pillars must be unique unscaled endpoint caps");
+                require(std::any_of(collision.chamber_blockers.begin(),
+                            collision.chamber_blockers.end(),
+                            [&](const ChamberBlockerRegion& blocker) {
+                                return blocker.stable_object_id
+                                    == instance.stable_object_id;
+                            }),
+                    "authored maze pillar has no matching solid blocker");
+                const MazeAuthoredModelPlacement placement{
+                    maze_authored_model_placement(room, instance)};
+                require(!probe_collision_world(collision, capsule,
+                            placement.translation_metres, 0.30)
+                            .supported,
+                    "authored maze pillar can be walked through");
+            } else {
+                require(instance.center_x_millimetres == 0
+                        && instance.target_length_millimetres == 0,
+                    "authored maze arches must remain centered and unscaled");
+                arch_thresholds.insert(instance.center_z_millimetres);
+                const MazeAuthoredModelPlacement placement{
+                    maze_authored_model_placement(room, instance)};
+                require(probe_collision_world(collision, capsule,
+                            placement.translation_metres, 0.30)
+                            .supported,
+                    "authored maze arch threshold contains a floor gap");
+                constexpr std::int32_t jamb_center_x_millimetres{1'830};
+                constexpr std::int32_t jamb_depth_sample_millimetres{700};
+                for (const std::int32_t local_x
+                    : {-jamb_center_x_millimetres,
+                        jamb_center_x_millimetres}) {
+                    for (const std::int32_t local_z_offset
+                        : {-jamb_depth_sample_millimetres,
+                            jamb_depth_sample_millimetres}) {
+                        const IntegerPoint3 sample{maze_local_to_world(room,
+                            local_x, 0,
+                            instance.center_z_millimetres + local_z_offset)};
+                        const GeometryVector3 feet{
+                            sample.x_millimetres / 1'000.0,
+                            sample.y_millimetres / 1'000.0,
+                            sample.z_millimetres / 1'000.0};
+                        require(!probe_collision_world(
+                                    collision, capsule, feet, 0.30)
+                                    .supported,
+                            "authored maze arch jamb can be walked through");
+                    }
+                }
+                for (const std::int32_t local_z_offset
+                    : {-jamb_depth_sample_millimetres,
+                        jamb_depth_sample_millimetres}) {
+                    const IntegerPoint3 sample{maze_local_to_world(room,
+                        0, 0,
+                        instance.center_z_millimetres + local_z_offset)};
+                    const GeometryVector3 feet{
+                        sample.x_millimetres / 1'000.0,
+                        sample.y_millimetres / 1'000.0,
+                        sample.z_millimetres / 1'000.0};
+                    require(probe_collision_world(
+                                collision, capsule, feet, 0.30)
+                                .supported,
+                        "authored maze arch opening is not walkable");
+                }
+            }
+        }
+        require(arch_thresholds == std::set<std::int32_t>{
+                    -maze_room_core_half_length_millimetres,
+                    maze_room_core_half_length_millimetres},
+            "authored maze arches must straddle both connector thresholds");
+
+        const std::vector<MazeAuthoredModelInstance> repeated{
+            maze_authored_model_instances(room)};
+        require(instances.size() == repeated.size(),
+            "authored maze instance count is not deterministic");
+        for (std::size_t index{}; index < instances.size(); ++index) {
+            const auto& first{instances[index]};
+            const auto& second{repeated[index]};
+            require(first.kind == second.kind
+                    && first.stable_object_id == second.stable_object_id
+                    && first.center_x_millimetres == second.center_x_millimetres
+                    && first.center_z_millimetres == second.center_z_millimetres
+                    && first.local_yaw_quarter_turns
+                        == second.local_yaw_quarter_turns
+                    && first.target_length_millimetres
+                        == second.target_length_millimetres,
+                "authored maze instance placement is not deterministic");
+        }
+    }
+}
+
 }  // namespace
 
 std::vector<TestCase> cave_scene_test_cases()
@@ -926,6 +1167,10 @@ std::vector<TestCase> cave_scene_test_cases()
             earth_water_tunnel_junctions_overlap_the_curved_route},
         {"exported layout uses six flat tunnels and no bridges",
             exported_layout_uses_six_flat_tunnels_and_no_bridges},
+        {"fixed layout inserts exactly five solvable maze rooms",
+            fixed_layout_inserts_exactly_five_maze_rooms},
+        {"generated maze authored instances follow walls and thresholds",
+            generated_maze_authored_instances_follow_walls_and_thresholds},
     };
 }
 

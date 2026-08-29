@@ -66,11 +66,11 @@ void complete_corpus_validates_reference_results(const std::filesystem::path&)
     require(report.fallback_acceptance_count == 0U, "reference corpus unexpectedly used fallback");
     require(report.results.size() == 2U, "corpus result metadata is incomplete");
     require(
-        report.results.front().scene_fingerprint == 0x1F8517F2C8D6C15AULL,
+        report.results.front().scene_fingerprint == 0x52CCEB23A788803DULL,
         "seed 42 scene fingerprint changed in the complete corpus");
     require(
         !report.results.back().used_fallback
-            && report.results.back().scene_fingerprint == 0x52F9039C6BAA9835ULL,
+            && report.results.back().scene_fingerprint == 0x2489A9BDA8738BB0ULL,
         "reference seed result changed");
 }
 

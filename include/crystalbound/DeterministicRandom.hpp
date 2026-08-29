@@ -12,6 +12,7 @@ inline constexpr std::uint64_t routes{0x8EBC6AF09C88C6E3ULL};
 inline constexpr std::uint64_t geometry{0x589965CC75374CC3ULL};
 inline constexpr std::uint64_t materials{0x1D8E4E27C47D124FULL};
 inline constexpr std::uint64_t decoration{0xEB44ACCAB455D165ULL};
+inline constexpr std::uint64_t maze{0x4D415A4553454544ULL};
 inline constexpr std::uint64_t retry{0xD6E8FEB86659FD93ULL};
 
 }  // namespace random_domain

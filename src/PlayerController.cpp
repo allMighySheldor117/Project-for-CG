@@ -1,4 +1,5 @@
 #include "crystalbound/PlayerController.hpp"
+#include "crystalbound/MazeGeneration.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -587,6 +588,8 @@ CollisionWorld build_collision_world(const CaveSceneData& scene)
         }
     }
 
+    append_maze_room_collision(world, scene.maze_rooms);
+
     world.routes.reserve(scene.routes.size());
     for (const RouteGeometryContract& route : scene.routes) {
         const double route_radius{
@@ -816,14 +819,19 @@ CollisionProbe probe_collision_world(
         || !std::isfinite(maximum_step_up_metres) || maximum_step_up_metres < 0.0) {
         throw ControllerError{"Collision probe received an invalid capsule or position."};
     }
-    CollisionProbe chamber{
+    CollisionProbe support{
         probe_chambers(world, capsule, feet_position_metres, maximum_step_up_metres)};
     const CollisionProbe route{
         probe_routes(world, capsule, feet_position_metres, maximum_step_up_metres)};
-    if (route.supported && better_probe(route, chamber, feet_position_metres.y)) {
-        return route;
+    if (route.supported && better_probe(route, support, feet_position_metres.y)) {
+        support = route;
     }
-    return chamber;
+    if (support.supported
+        && blocked_by_template_boundary(
+            world, capsule, feet_position_metres, support)) {
+        return {};
+    }
+    return support;
 }
 
 bool intersects_fall_region(

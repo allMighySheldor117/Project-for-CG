@@ -1,4 +1,5 @@
 #include "crystalbound/ProfileTraversal.hpp"
+#include "crystalbound/MazeGeneration.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -160,17 +161,45 @@ ProfileTraversalWorkload build_profile_traversal_workload(
             append_i32(hash, control.z_millimetres);
         }
 
-        std::vector<SplineSample> samples{sample_centripetal_catmull_rom(route.spline)};
-        if (reverse) {
-            std::reverse(samples.begin(), samples.end());
-        }
-        for (const SplineSample& sample : samples) {
-            workload.waypoints_metres.push_back({
-                sample.position_metres.x,
-                sample.position_metres.y
-                    - static_cast<double>(route.spline.radius_millimetres) / 1'000.0,
-                sample.position_metres.z,
-            });
+        const MazeRoomContract* maze{
+            maze_room_for_route(generation.scene.maze_rooms, route.edge)};
+        const auto append_route_samples = [&](const RouteGeometryContract& segment,
+                                               const bool reverse_segment) {
+            std::vector<SplineSample> samples{
+                sample_centripetal_catmull_rom(segment.spline)};
+            if (reverse_segment) {
+                std::reverse(samples.begin(), samples.end());
+            }
+            for (const SplineSample& sample : samples) {
+                workload.waypoints_metres.push_back({sample.position_metres.x,
+                    sample.position_metres.y
+                        - static_cast<double>(route.spline.radius_millimetres) / 1'000.0,
+                    sample.position_metres.z});
+            }
+        };
+        if (maze == nullptr) {
+            append_route_samples(route, reverse);
+        } else {
+            append_u32(hash, static_cast<std::uint32_t>(maze->fingerprint));
+            append_u32(hash, static_cast<std::uint32_t>(maze->fingerprint >> 32U));
+            const std::array<RouteGeometryContract, 2> segments{
+                maze_tunnel_segments(route, *maze)};
+            if (!reverse) {
+                append_route_samples(segments[0], false);
+                for (const MazeCellCoordinate cell : maze->solution_cells) {
+                    workload.waypoints_metres.push_back(
+                        maze_cell_center_metres(*maze, cell));
+                }
+                append_route_samples(segments[1], false);
+            } else {
+                append_route_samples(segments[1], true);
+                for (auto cell = maze->solution_cells.rbegin();
+                     cell != maze->solution_cells.rend(); ++cell) {
+                    workload.waypoints_metres.push_back(
+                        maze_cell_center_metres(*maze, *cell));
+                }
+                append_route_samples(segments[0], true);
+            }
         }
         const ChamberGeometryContract& destination{chamber_for(generation.scene, to)};
         workload.waypoints_metres.push_back({

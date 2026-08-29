@@ -15,6 +15,15 @@ struct CaveSceneData;
 inline constexpr double maximum_crystal_interaction_range_metres{2.2};
 inline constexpr double maximum_crystal_focus_angle_degrees{12.0};
 
+struct InteractionFocusLimits {
+    double maximum_range_metres{};
+    double maximum_angle_degrees{};
+};
+
+inline constexpr InteractionFocusLimits crystal_interaction_focus_limits{
+    maximum_crystal_interaction_range_metres,
+    maximum_crystal_focus_angle_degrees};
+
 struct CrystalInteractionTarget {
     Element element{Element::fire};
     std::uint64_t stable_object_id{};
@@ -121,7 +130,8 @@ private:
     const std::vector<CrystalInteractionTarget>& targets,
     const CameraInteractionQuery& query,
     const VisibilityWorld& visibility,
-    const CrystalCollectionState& collection) noexcept;
+    const CrystalCollectionState& collection,
+    InteractionFocusLimits limits = crystal_interaction_focus_limits) noexcept;
 [[nodiscard]] CollectionAttemptResult attempt_crystal_collection(
     const std::vector<CrystalInteractionTarget>& targets,
     const CameraInteractionQuery& query,

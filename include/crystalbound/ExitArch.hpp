@@ -11,6 +11,9 @@
 
 namespace crystalbound {
 
+inline constexpr InteractionFocusLimits exit_arch_interaction_focus_limits{
+    3.5, 30.0};
+
 struct ExitSocketContract {
     Element element{Element::fire};
     std::uint64_t stable_object_id{};

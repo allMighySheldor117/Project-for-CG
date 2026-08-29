@@ -27,7 +27,7 @@ struct GeneratorVersion {
     std::uint32_t value{};
 };
 
-inline constexpr GeneratorVersion current_generator_version{3U};
+inline constexpr GeneratorVersion current_generator_version{5U};
 
 struct TopologyLimits {
     std::int32_t horizontal_anchor_millimetres{};

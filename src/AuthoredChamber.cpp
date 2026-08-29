@@ -386,8 +386,12 @@ void include_bounds(SourceBounds& target, const MaterialModelObject& object)
 [[nodiscard]] std::optional<std::string> aether_walkable_group(
     const std::string_view name)
 {
-    if (name == "CrystalFloorBase" || name == "MainCauseway"
-        || name == "Portal1_PassageFloor") {
+    const bool authored_portal{
+        begins_with(name, "Portal1_") || begins_with(name, "Portal2_")};
+    if (name == "FloorBase" || name == "CrystalFloorBase"
+        || name == "MainCauseway"
+        || (authored_portal
+            && name.find("PassageFloor") != std::string_view::npos)) {
         return std::string{name};
     }
     return std::nullopt;
@@ -395,8 +399,11 @@ void include_bounds(SourceBounds& target, const MaterialModelObject& object)
 
 [[nodiscard]] bool aether_solid_object(const std::string_view name) noexcept
 {
-    return begins_with(name, "Portal1_PassageWall")
-        || begins_with(name, "Portal1_Side")
+    const bool authored_portal{
+        begins_with(name, "Portal1_") || begins_with(name, "Portal2_")};
+    return (authored_portal
+               && (name.find("PassageWall") != std::string_view::npos
+                   || name.find("_Side") != std::string_view::npos))
         || name.find("Nexus") != std::string_view::npos
         || name.find("Pillar") != std::string_view::npos
         || name.find("Obelisk") != std::string_view::npos;
@@ -491,7 +498,7 @@ const std::vector<std::string>& exit_render_excluded_object_names()
 {
     static const std::vector<std::string> names = [] {
         std::vector<std::string> result{"ACTIVATED_PORTAL_SURFACE"};
-        for (std::uint32_t index{}; index < 33U; ++index) {
+        for (std::uint32_t index{}; index < 34U; ++index) {
             std::string name{"PortalParticle_"};
             if (index < 10U) {
                 name += '0';

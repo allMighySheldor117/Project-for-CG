@@ -14,6 +14,7 @@
 
 #include "crystalbound/AuthoredChamber.hpp"
 #include "crystalbound/Camera.hpp"
+#include "crystalbound/CaveScene.hpp"
 #include "crystalbound/ChamberTemplates.hpp"
 #include "crystalbound/CrystalCollection.hpp"
 #include "crystalbound/ExitArch.hpp"
@@ -243,6 +244,101 @@ void supplied_elemental_crystal_isolated_from_scenery(
     require_valid_mesh(result.batches.front().mesh);
 }
 
+void authored_maze_room_preserves_two_opposed_connectors(
+    const std::filesystem::path& root)
+{
+    const MaterialModelLoadResult result{
+        crystalbound::load_obj_material_batches(fixture(root, "MazeRoom.obj"))};
+    require(!result.batches.empty(), "authored maze room has no render batches");
+    require_near(result.minimum_bounds[0], -12.522303F,
+        "maze room minimum x changed", 1.0e-4F);
+    require_near(result.maximum_bounds[0], 12.526765F,
+        "maze room maximum x changed", 1.0e-4F);
+    require_near(result.minimum_bounds[2], -19.5F,
+        "maze north connector moved", 1.0e-4F);
+    require_near(result.maximum_bounds[2], 19.5F,
+        "maze south connector moved", 1.0e-4F);
+    const auto find_object = [&](const std::string_view name) {
+        return std::find_if(result.objects.begin(), result.objects.end(),
+            [&](const crystalbound::MaterialModelObject& object) {
+                return object.name == name;
+            });
+    };
+    const auto south_connector{
+        find_object("DOOR_Entrance_South_ConnectorFloor")};
+    const auto north_connector{
+        find_object("DOOR_Exit_North_ConnectorFloor")};
+    const auto main_floor{find_object("FLOOR_MainFoundation")};
+    require(south_connector != result.objects.end(),
+        "maze room lost its south entrance contract");
+    require(north_connector != result.objects.end(),
+        "maze room lost its north exit contract");
+    require(main_floor != result.objects.end(),
+        "maze room lost its main walkable floor");
+    require_near(main_floor->minimum_bounds[0],
+        -crystalbound::maze_room_half_width_millimetres / 1'000.0F,
+        "maze floor minimum x disagrees with generation", 1.0e-4F);
+    require_near(main_floor->maximum_bounds[0],
+        crystalbound::maze_room_half_width_millimetres / 1'000.0F,
+        "maze floor maximum x disagrees with generation", 1.0e-4F);
+    require_near(main_floor->minimum_bounds[2],
+        -crystalbound::maze_room_core_half_length_millimetres / 1'000.0F,
+        "maze floor north edge disagrees with generation", 1.0e-4F);
+    require_near(main_floor->maximum_bounds[2],
+        crystalbound::maze_room_core_half_length_millimetres / 1'000.0F,
+        "maze floor south edge disagrees with generation", 1.0e-4F);
+    require_near(south_connector->maximum_bounds[2],
+        crystalbound::maze_room_connector_half_length_millimetres / 1'000.0F,
+        "south connector length disagrees with generation", 1.0e-4F);
+    require_near(north_connector->minimum_bounds[2],
+        -crystalbound::maze_room_connector_half_length_millimetres / 1'000.0F,
+        "north connector length disagrees with generation", 1.0e-4F);
+    require_near(south_connector->maximum_bounds[0],
+        crystalbound::maze_room_door_half_width_millimetres / 1'000.0F,
+        "south doorway width disagrees with the tunnel", 1.0e-4F);
+    require_near(north_connector->minimum_bounds[0],
+        -crystalbound::maze_room_door_half_width_millimetres / 1'000.0F,
+        "north doorway width disagrees with the tunnel", 1.0e-4F);
+}
+
+void authored_maze_components_match_generator_dimensions(
+    const std::filesystem::path& root)
+{
+    struct ExpectedComponent {
+        const char* filename;
+        const char* structural_object;
+        std::array<float, 3> minimum;
+        std::array<float, 3> maximum;
+        std::size_t material_count;
+    };
+    constexpr std::array<ExpectedComponent, 3> expected{{
+        {"MazeWall.obj", "MAZE_WALL_StructuralCore",
+            {-2.0F, 0.0F, -0.15F}, {2.0F, 4.25F, 0.15F}, 6U},
+        {"MazePillar.obj", "MAZE_PILLAR_ShaftCore",
+            {-0.28F, 0.0F, -0.28F}, {0.28F, 4.35F, 0.28F}, 6U},
+        {"MazeArch.obj", "MAZE_ARCH_ConnectorFloor",
+            {-2.06F, -0.11F, -0.75F}, {2.06F, 4.25F, 0.75F}, 8U},
+    }};
+    for (const ExpectedComponent& contract : expected) {
+        const crystalbound::MaterialModelLoadResult model{
+            crystalbound::load_obj_material_batches(
+                fixture(root, contract.filename))};
+        require(model.batches.size() == contract.material_count,
+            "authored maze component material count changed");
+        for (std::size_t axis{}; axis < 3U; ++axis) {
+            require_near(model.minimum_bounds[axis], contract.minimum[axis],
+                "authored maze component minimum bound changed", 1.0e-4F);
+            require_near(model.maximum_bounds[axis], contract.maximum[axis],
+                "authored maze component maximum bound changed", 1.0e-4F);
+        }
+        require(std::any_of(model.objects.begin(), model.objects.end(),
+                    [&](const crystalbound::MaterialModelObject& object) {
+                        return object.name == contract.structural_object;
+                    }),
+            "authored maze component lost its structural source object");
+    }
+}
+
 void complete_normals_are_normalized(const std::filesystem::path& root)
 {
     const ModelLoadResult result =
@@ -434,6 +530,31 @@ void air_authored_render_excludes_dark_doorway_caps(const std::filesystem::path&
         "Air entrance B dark passage cap must not be rendered");
 }
 
+void exit_authored_render_excludes_every_dormant_portal_effect(
+    const std::filesystem::path& root)
+{
+    const crystalbound::MaterialModelLoadResult model{
+        crystalbound::load_obj_material_batches(root / "ExitChamber.obj")};
+    const std::vector<std::string>& excluded{
+        crystalbound::exit_render_excluded_object_names()};
+    const auto excludes = [&excluded](const std::string_view name) {
+        return std::find(excluded.begin(), excluded.end(), name) != excluded.end();
+    };
+    require(excludes("ACTIVATED_PORTAL_SURFACE"),
+        "The authored active portal surface must stay hidden until activation");
+
+    std::size_t particle_count{};
+    for (const crystalbound::MaterialModelObject& object : model.objects) {
+        if (object.name.rfind("PortalParticle_", 0U) == 0U) {
+            ++particle_count;
+            require(excludes(object.name),
+                "Every authored portal particle must stay hidden until activation");
+        }
+    }
+    require(particle_count == 34U,
+        "The updated Exit chamber must preserve all 34 portal particles");
+}
+
 void authored_endpoint_templates_match_supplied_doorways(const std::filesystem::path&)
 {
     const crystalbound::ChamberTemplate& start{
@@ -584,6 +705,43 @@ void authored_collision_supports_both_sides_of_every_tunnel_seam(
                 "No authored doorway seam may overlap a fall region");
         }
     }
+}
+
+void updated_aether_collision_recognizes_the_floor_and_both_entrances(
+    const std::filesystem::path& root)
+{
+    const crystalbound::CaveGenerationResult generation{
+        crystalbound::generate_cave({42U})};
+    const crystalbound::MaterialModelLoadResult model{
+        crystalbound::load_obj_material_batches(root / "AetherChamber.obj")};
+    const crystalbound::AuthoredChamberPlacement placement{
+        crystalbound::aether_chamber_placement(generation.scene)};
+    const crystalbound::AuthoredChamberCollisionContract collision{
+        crystalbound::build_aether_chamber_collision(model, placement)};
+
+    require(collision.supports.size() == 4U,
+        "Updated Aether floor, causeway, and both passage floors must be walkable");
+    require(collision.blockers.size() == 4U,
+        "Both updated Aether entrances must retain two solid passage walls");
+
+    const bool has_full_floor{std::any_of(collision.supports.begin(),
+        collision.supports.end(), [](const crystalbound::ChamberSupportRegion& support) {
+            auto minimum_x = std::numeric_limits<std::int32_t>::max();
+            auto minimum_z = std::numeric_limits<std::int32_t>::max();
+            auto maximum_x = std::numeric_limits<std::int32_t>::min();
+            auto maximum_z = std::numeric_limits<std::int32_t>::min();
+            for (const crystalbound::TemplatePoint2 point
+                : support.world_polygon_millimetres) {
+                minimum_x = std::min(minimum_x, point.x_millimetres);
+                minimum_z = std::min(minimum_z, point.z_millimetres);
+                maximum_x = std::max(maximum_x, point.x_millimetres);
+                maximum_z = std::max(maximum_z, point.z_millimetres);
+            }
+            return maximum_x - minimum_x >= 44'000
+                && maximum_z - minimum_z >= 44'000;
+        })};
+    require(has_full_floor,
+        "Updated Aether floor away from the causeway must support the player");
 }
 
 [[nodiscard]] crystalbound::GeometryVector3 transform_authored_point(
@@ -754,6 +912,10 @@ int main(const int argument_count, char* arguments[])
         {"material OBJ batches preserve authored scale", material_batches_preserve_authored_scale},
         {"supplied elemental crystal is isolated from scenery",
             supplied_elemental_crystal_isolated_from_scenery},
+        {"authored maze room preserves two opposed connectors",
+            authored_maze_room_preserves_two_opposed_connectors},
+        {"authored maze components match generator dimensions",
+            authored_maze_components_match_generator_dimensions},
         {"complete supplied normals are normalized", complete_normals_are_normalized},
         {"split OBJ indices are preserved", split_indices_are_preserved},
         {"hard edges duplicate position/normal tuples", hard_edges_duplicate_positions},
@@ -769,12 +931,16 @@ int main(const int argument_count, char* arguments[])
         {"camera movement is delta-time based", camera_movement_is_delta_time_based},
         {"Air authored render excludes dark doorway caps",
             air_authored_render_excludes_dark_doorway_caps},
+        {"Exit authored render excludes every dormant portal effect",
+            exit_authored_render_excludes_every_dormant_portal_effect},
         {"authored endpoint templates match supplied doorways",
             authored_endpoint_templates_match_supplied_doorways},
         {"authored fixed layout aligns every route at one-to-one scale",
             authored_fixed_layout_aligns_every_route_at_one_to_one_scale},
         {"authored collision supports both sides of every tunnel seam",
             authored_collision_supports_both_sides_of_every_tunnel_seam},
+        {"updated Aether collision recognizes the floor and both entrances",
+            updated_aether_collision_recognizes_the_floor_and_both_entrances},
         {"authored terminal tunnels stop at the doorway",
             authored_terminal_tunnels_stop_at_the_doorway},
         {"authored exit display matches named OBJ markers",

@@ -22,6 +22,17 @@ inline constexpr std::int32_t tunnel_clear_width_millimetres{3'200};
 inline constexpr std::int32_t tunnel_side_height_millimetres{2'200};
 inline constexpr std::int32_t tunnel_crown_height_millimetres{4'000};
 inline constexpr std::int32_t tunnel_protected_corridor_millimetres{2'400};
+inline constexpr std::uint32_t fixed_maze_room_count{5U};
+inline constexpr std::uint32_t maze_grid_columns{7U};
+inline constexpr std::uint32_t maze_grid_rows{9U};
+inline constexpr std::int32_t maze_room_half_width_millimetres{12'000};
+inline constexpr std::int32_t maze_room_core_half_length_millimetres{18'000};
+inline constexpr std::int32_t maze_room_connector_half_length_millimetres{19'500};
+inline constexpr std::int32_t maze_room_door_half_width_millimetres{1'600};
+inline constexpr std::int32_t maze_minimum_tunnel_run_millimetres{6'000};
+inline constexpr std::int32_t maze_wall_thickness_millimetres{300};
+inline constexpr std::int32_t maze_wall_height_millimetres{4'000};
+inline constexpr std::int32_t maze_tunnel_overlap_millimetres{100};
 inline constexpr std::uint64_t second_bridge_decision_domain{
     0x4252494447450002ULL};
 inline constexpr std::uint64_t second_bridge_score_domain{
@@ -40,6 +51,7 @@ enum class ScenePieceKind : std::uint8_t {
     junction,
     bridge,
     natural_formation,
+    maze_wall,
 };
 
 enum class ColliderKind : std::uint8_t {
@@ -142,6 +154,44 @@ struct RouteGeometryContract {
     std::int32_t bridge_rail_height_millimetres{};
 };
 
+enum class MazeWallDirection : std::uint8_t {
+    local_x,
+    local_z,
+};
+
+struct MazeCellCoordinate {
+    std::uint32_t column{};
+    std::uint32_t row{};
+};
+
+constexpr bool operator==(
+    const MazeCellCoordinate left,
+    const MazeCellCoordinate right) noexcept
+{
+    return left.column == right.column && left.row == right.row;
+}
+
+struct MazeWallContract {
+    std::uint64_t stable_object_id{};
+    MazeWallDirection direction{MazeWallDirection::local_x};
+    std::int32_t center_x_millimetres{};
+    std::int32_t center_z_millimetres{};
+    std::int32_t length_millimetres{};
+};
+
+struct MazeRoomContract {
+    Edge route{};
+    std::uint32_t ordinal{};
+    IntegerPoint3 floor_center_millimetres{};
+    std::int32_t forward_x_milli{};
+    std::int32_t forward_z_milli{};
+    std::uint32_t columns{};
+    std::uint32_t rows{};
+    std::vector<MazeWallContract> walls{};
+    std::vector<MazeCellCoordinate> solution_cells{};
+    std::uint64_t fingerprint{};
+};
+
 struct SceneMeshPiece {
     ScenePieceKind kind{ScenePieceKind::chamber_shell};
     std::uint64_t stable_object_id{};
@@ -165,6 +215,7 @@ struct CaveSceneData {
     std::vector<ChamberGeometryContract> chambers{};
     std::vector<PortalContract> portals{};
     std::vector<RouteGeometryContract> routes{};
+    std::vector<MazeRoomContract> maze_rooms{};
     std::vector<SceneMeshPiece> mesh_pieces{};
     std::vector<SceneCollider> colliders{};
     std::vector<Edge> bridge_routes{};

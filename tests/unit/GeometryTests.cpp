@@ -349,7 +349,7 @@ void geometry_fingerprint_is_stable_and_sensitive(const std::filesystem::path&)
     const std::uint64_t first = geometry_contract_fingerprint({123'456'789U}, input);
     const std::uint64_t second = geometry_contract_fingerprint({123'456'789U}, input);
     require(first == second, "same integer contract changed fingerprint");
-    if (first != 0xD09AB1A658F4CD20ULL) {
+    if (first != 0x10A061461068C4CEULL) {
         throw GeometryTestFailure{
             "fixed route changed geometry contract fingerprint: got "
             + format_fingerprint(first)};

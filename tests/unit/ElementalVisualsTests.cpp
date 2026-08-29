@@ -437,7 +437,7 @@ void elemental_render_passes_are_explicit(const std::filesystem::path&)
 void structural_and_collision_contracts_remain_unchanged(const std::filesystem::path&)
 {
     const CaveGenerationResult result{generate_cave({42U})};
-    require(result.scene.fingerprint == 0x1F8517F2C8D6C15AULL,
+    require(result.scene.fingerprint == 0x52CCEB23A788803DULL,
         "structural cave fingerprint changed");
     require(result.reachability.accepted, "elemental visuals changed reachability");
     for (const ElementalChamberVisual& chamber : result.scene.elemental_visuals.chambers) {

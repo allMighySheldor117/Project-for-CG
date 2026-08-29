@@ -7,10 +7,13 @@
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <memory>
+#include <numeric>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -22,6 +25,7 @@
 #include <glm/mat3x3.hpp>
 #include <glm/mat4x4.hpp>
 #include <glm/vec3.hpp>
+#include <glm/vec4.hpp>
 
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
@@ -31,6 +35,7 @@
 #include "crystalbound/AuthoredChamber.hpp"
 #include "crystalbound/GpuMesh.hpp"
 #include "crystalbound/GpuTexture.hpp"
+#include "crystalbound/MazeGeneration.hpp"
 #include "crystalbound/ObjLoader.hpp"
 #include "crystalbound/Rendering.hpp"
 #include "crystalbound/ResourcePaths.hpp"
@@ -344,6 +349,52 @@ struct ImportedMaterialStyle {
         {air_render_excluded_object_names()});
 }
 
+struct AuthoredMazeAssets {
+    MaterialModelLoadResult room{};
+    MaterialModelLoadResult wall{};
+    MaterialModelLoadResult pillar{};
+    MaterialModelLoadResult arch{};
+};
+
+[[nodiscard]] MaterialModelLoadResult load_authored_maze_component_lod(
+    const std::filesystem::path& path,
+    const std::initializer_list<std::string_view> excluded_name_fragments)
+{
+    const MaterialModelLoadResult complete{load_obj_material_batches(path)};
+    MaterialModelLoadOptions options;
+    for (const MaterialModelObject& object : complete.objects) {
+        const bool excluded{std::any_of(excluded_name_fragments.begin(),
+            excluded_name_fragments.end(), [&](const std::string_view fragment) {
+                return object.name.find(fragment) != std::string::npos;
+            })};
+        if (excluded) {
+            options.excluded_object_names.push_back(object.name);
+        }
+    }
+    MaterialModelLoadResult lod{load_obj_material_batches(path, options)};
+    if (lod.batches.empty()) {
+        throw ModelLoadError(
+            "Authored maze runtime LOD excluded every renderable object: "
+            + path.u8string());
+    }
+    return lod;
+}
+
+[[nodiscard]] AuthoredMazeAssets load_authored_maze_assets(
+    const std::filesystem::path& resource_directory)
+{
+    const std::filesystem::path models{
+        resource_directory / "assets" / "models"};
+    return {
+        load_obj_material_batches(models / "MazeRoom.obj"),
+        load_authored_maze_component_lod(
+            models / "MazeWall.obj", {"_Course_", "_Crack_"}),
+        load_authored_maze_component_lod(
+            models / "MazePillar.obj", {"_Shaft_", "_Crack_"}),
+        load_obj_material_batches(models / "MazeArch.obj"),
+    };
+}
+
 [[nodiscard]] MaterialModelLoadResult load_elemental_crystal_asset(
     const std::filesystem::path& resource_directory)
 {
@@ -461,6 +512,7 @@ public:
         const MaterialModelLoadResult& authored_aether,
         const MaterialModelLoadResult& authored_start,
         const MaterialModelLoadResult& authored_exit,
+        const AuthoredMazeAssets& authored_maze,
         const ExitArchData& exit_arch,
         const Seed effective_seed)
         : shader_program_(
@@ -508,9 +560,12 @@ public:
             const bool replaced_by_authored_exit{
                 piece.owner_chamber_id == std::optional<NodeId>{
                     exit_placement.chamber_id}};
+            const bool replaced_by_authored_maze_wall{
+                piece.kind == ScenePieceKind::maze_wall};
             if (replaced_by_authored_fire || replaced_by_authored_water || replaced_by_authored_earth
                 || replaced_by_authored_air || replaced_by_authored_aether
-                || replaced_by_authored_start || replaced_by_authored_exit) {
+                || replaced_by_authored_start || replaced_by_authored_exit
+                || replaced_by_authored_maze_wall) {
                 continue;
             }
             pieces_.push_back({piece.material, piece.albedo,
@@ -660,6 +715,150 @@ public:
         upload_authored(authored_start, imported_start_pieces_);
         imported_exit_model_ = authored_model(exit_placement);
         upload_authored(authored_exit, imported_exit_pieces_);
+        upload_authored(authored_maze.room, imported_maze_pieces_);
+        imported_maze_models_.reserve(scene.maze_rooms.size());
+        imported_maze_centers_.reserve(scene.maze_rooms.size());
+        for (const MazeRoomContract& maze : scene.maze_rooms) {
+            glm::mat4 model{1.0F};
+            model = glm::translate(model, {
+                static_cast<float>(maze.floor_center_millimetres.x_millimetres)
+                    * millimetres_to_metres,
+                static_cast<float>(maze.floor_center_millimetres.y_millimetres)
+                    * millimetres_to_metres,
+                static_cast<float>(maze.floor_center_millimetres.z_millimetres)
+                    * millimetres_to_metres});
+            const float yaw{std::atan2(
+                -static_cast<float>(maze.forward_x_milli),
+                -static_cast<float>(maze.forward_z_milli))};
+            imported_maze_models_.push_back(
+                glm::rotate(model, yaw, {0.0F, 1.0F, 0.0F}));
+            imported_maze_centers_.push_back({
+                static_cast<float>(maze.floor_center_millimetres.x_millimetres)
+                    * millimetres_to_metres,
+                static_cast<float>(maze.floor_center_millimetres.y_millimetres)
+                    * millimetres_to_metres,
+                static_cast<float>(maze.floor_center_millimetres.z_millimetres)
+                    * millimetres_to_metres});
+        }
+        std::vector<std::array<std::vector<glm::mat4>, 3>>
+            maze_room_component_models;
+        maze_room_component_models.reserve(scene.maze_rooms.size());
+        std::size_t authored_maze_instance_count{};
+        for (const MazeRoomContract& maze : scene.maze_rooms) {
+            std::array<std::vector<glm::mat4>, 3> component_models;
+            const std::vector<MazeAuthoredModelInstance> instances{
+                maze_authored_model_instances(maze)};
+            authored_maze_instance_count += instances.size();
+            for (const MazeAuthoredModelInstance& instance : instances) {
+                const std::size_t kind_index{
+                    static_cast<std::size_t>(instance.kind)};
+                if (kind_index >= component_models.size()) {
+                    throw std::runtime_error(
+                        "Maze generator returned an unknown authored model kind.");
+                }
+                const MazeAuthoredModelPlacement placement{
+                    maze_authored_model_placement(maze, instance)};
+                glm::mat4 model{1.0F};
+                model = glm::translate(model, {
+                    static_cast<float>(placement.translation_metres.x),
+                    static_cast<float>(placement.translation_metres.y),
+                    static_cast<float>(placement.translation_metres.z)});
+                model = glm::rotate(model,
+                    static_cast<float>(placement.yaw_radians),
+                    {0.0F, 1.0F, 0.0F});
+                model = glm::scale(model, {
+                    static_cast<float>(placement.scale.x),
+                    static_cast<float>(placement.scale.y),
+                    static_cast<float>(placement.scale.z)});
+                component_models[kind_index].push_back(model);
+            }
+            maze_room_component_models.push_back(std::move(component_models));
+        }
+        const auto source_triangle_count = [](const MaterialModelLoadResult& source) {
+            std::size_t count{};
+            for (const MaterialMeshBatch& batch : source.batches) {
+                count += batch.mesh.indices.size() / 3U;
+            }
+            return count;
+        };
+        std::size_t authored_maze_baked_vertex_count{};
+        std::size_t authored_maze_baked_triangle_count{};
+        const auto upload_baked_authored = [
+            &authored_maze_baked_vertex_count,
+            &authored_maze_baked_triangle_count](
+            const MaterialModelLoadResult& source,
+            const std::vector<glm::mat4>& models,
+            std::vector<ImportedRenderPiece>& destination) {
+            if (models.empty()) {
+                throw std::runtime_error(
+                    "Authored maze component has no generated instances.");
+            }
+            destination.reserve(destination.size() + source.batches.size());
+            for (const MaterialMeshBatch& batch : source.batches) {
+                if (batch.mesh.vertices.size()
+                        > std::numeric_limits<std::size_t>::max()
+                            / models.size()
+                    || batch.mesh.indices.size()
+                        > std::numeric_limits<std::size_t>::max()
+                            / models.size()) {
+                    throw std::overflow_error(
+                        "Authored maze instance baking exceeds addressable memory.");
+                }
+                MeshData baked;
+                baked.vertices.reserve(batch.mesh.vertices.size() * models.size());
+                baked.indices.reserve(batch.mesh.indices.size() * models.size());
+                for (const glm::mat4& model : models) {
+                    if (baked.vertices.size()
+                        > std::numeric_limits<std::uint32_t>::max()
+                            - batch.mesh.vertices.size()) {
+                        throw std::overflow_error(
+                            "Authored maze batch exceeds 32-bit mesh indices.");
+                    }
+                    const auto vertex_offset{
+                        static_cast<std::uint32_t>(baked.vertices.size())};
+                    const glm::mat3 normal_matrix{
+                        glm::inverseTranspose(glm::mat3{model})};
+                    for (Vertex vertex : batch.mesh.vertices) {
+                        const glm::vec4 position{model * glm::vec4{
+                            vertex.position[0], vertex.position[1],
+                            vertex.position[2], 1.0F}};
+                        const glm::vec3 normal{glm::normalize(normal_matrix
+                            * glm::vec3{vertex.normal[0], vertex.normal[1],
+                                vertex.normal[2]})};
+                        vertex.position = {position.x, position.y, position.z};
+                        vertex.normal = {normal.x, normal.y, normal.z};
+                        baked.vertices.push_back(vertex);
+                    }
+                    for (const std::uint32_t index : batch.mesh.indices) {
+                        baked.indices.push_back(vertex_offset + index);
+                    }
+                }
+                const ImportedMaterialStyle style{
+                    authored_mtl_material_style(batch)};
+                authored_maze_baked_vertex_count += baked.vertices.size();
+                authored_maze_baked_triangle_count += baked.indices.size() / 3U;
+                destination.push_back({style.kind, style.albedo, style.emission,
+                    std::make_unique<GpuMesh>(baked)});
+            }
+        };
+        imported_maze_component_rooms_.reserve(
+            maze_room_component_models.size());
+        for (const auto& component_models : maze_room_component_models) {
+            std::vector<ImportedRenderPiece> room_pieces;
+            upload_baked_authored(authored_maze.wall,
+                component_models[static_cast<std::size_t>(
+                    MazeAuthoredModelKind::wall)],
+                room_pieces);
+            upload_baked_authored(authored_maze.pillar,
+                component_models[static_cast<std::size_t>(
+                    MazeAuthoredModelKind::pillar)],
+                room_pieces);
+            upload_baked_authored(authored_maze.arch,
+                component_models[static_cast<std::size_t>(
+                    MazeAuthoredModelKind::arch)],
+                room_pieces);
+            imported_maze_component_rooms_.push_back(std::move(room_pieces));
+        }
         const MaterialModelLoadResult authored_elemental_crystal{
             load_elemental_crystal_asset(resource_directory)};
         if (authored_elemental_crystal.batches.size() != 1U) {
@@ -755,7 +954,46 @@ public:
                   << "  Objects: " << authored_air.objects.size() << '\n'
                   << "  Vertices: " << authored_air_vertex_count << '\n'
                   << "  Triangles: " << authored_air_triangle_count << '\n'
-                  << "  Authored scale: 1\n";
+                  << "  Authored scale: 1\n"
+                  << "Authored maze components uploaded\n"
+                  << "  Instances: " << authored_maze_instance_count << '\n'
+                  << "  Baked material batches: "
+                  << (imported_maze_component_rooms_.empty()
+                          ? 0U
+                          : imported_maze_component_rooms_.front().size())
+                  << " per room\n"
+                  << "  Baked vertices: "
+                  << authored_maze_baked_vertex_count << '\n'
+                  << "  Baked triangles: "
+                  << authored_maze_baked_triangle_count << '\n'
+                  << "  Wall instances/source triangles: "
+                  << authored_maze_instance_count
+                  - std::accumulate(maze_room_component_models.begin(),
+                        maze_room_component_models.end(), std::size_t{},
+                        [](const std::size_t count, const auto& models) {
+                            return count
+                                + models[static_cast<std::size_t>(
+                                    MazeAuthoredModelKind::pillar)].size()
+                                + models[static_cast<std::size_t>(
+                                    MazeAuthoredModelKind::arch)].size();
+                        })
+                  << '/' << source_triangle_count(authored_maze.wall) << '\n'
+                  << "  Pillar instances/source triangles: "
+                  << std::accumulate(maze_room_component_models.begin(),
+                        maze_room_component_models.end(), std::size_t{},
+                        [](const std::size_t count, const auto& models) {
+                            return count + models[static_cast<std::size_t>(
+                                MazeAuthoredModelKind::pillar)].size();
+                        })
+                  << '/' << source_triangle_count(authored_maze.pillar) << '\n'
+                  << "  Arch instances/source triangles: "
+                  << std::accumulate(maze_room_component_models.begin(),
+                        maze_room_component_models.end(), std::size_t{},
+                        [](const std::size_t count, const auto& models) {
+                            return count + models[static_cast<std::size_t>(
+                                MazeAuthoredModelKind::arch)].size();
+                        })
+                  << '/' << source_triangle_count(authored_maze.arch) << '\n';
     }
 
     void render(
@@ -857,6 +1095,37 @@ public:
         for (const ImportedRenderPiece& piece : imported_exit_pieces_) {
             set_material(piece.material, piece.albedo, piece.emission, 1.0F);
             piece.mesh->draw();
+        }
+        const float maze_visibility_radius{
+            fog.end_distance_metres + 27.0F};
+        const float maze_visibility_radius_squared{
+            maze_visibility_radius * maze_visibility_radius};
+        for (std::size_t room_index{};
+             room_index < imported_maze_models_.size(); ++room_index) {
+            if (room_index >= imported_maze_centers_.size()
+                || room_index >= imported_maze_component_rooms_.size()) {
+                throw std::runtime_error(
+                    "Authored maze render groups are not aligned by room.");
+            }
+            const glm::vec3 offset{
+                imported_maze_centers_[room_index] - camera_position};
+            const float horizontal_distance_squared{
+                offset.x * offset.x + offset.z * offset.z};
+            if (horizontal_distance_squared > maze_visibility_radius_squared) {
+                continue;
+            }
+            const glm::mat4& model{imported_maze_models_[room_index]};
+            set_model(model);
+            for (const ImportedRenderPiece& piece : imported_maze_pieces_) {
+                set_material(piece.material, piece.albedo, piece.emission, 1.0F);
+                piece.mesh->draw();
+            }
+            set_model(glm::mat4{1.0F});
+            for (const ImportedRenderPiece& piece
+                 : imported_maze_component_rooms_[room_index]) {
+                set_material(piece.material, piece.albedo, piece.emission, 1.0F);
+                piece.mesh->draw();
+            }
         }
 
         render_elemental_layer(ElementalRenderLayer::opaque, opaque_render_pass,
@@ -1044,6 +1313,11 @@ private:
     std::vector<ImportedRenderPiece> imported_start_pieces_{};
     glm::mat4 imported_exit_model_{1.0F};
     std::vector<ImportedRenderPiece> imported_exit_pieces_{};
+    std::vector<glm::mat4> imported_maze_models_{};
+    std::vector<glm::vec3> imported_maze_centers_{};
+    std::vector<ImportedRenderPiece> imported_maze_pieces_{};
+    std::vector<std::vector<ImportedRenderPiece>>
+        imported_maze_component_rooms_{};
     ElementalSceneData elemental_visuals_{};
     std::vector<ElementalRenderPiece> elemental_pieces_{};
     ExitArchData exit_arch_{};
@@ -1117,6 +1391,8 @@ void Application::initialize()
         load_start_chamber_asset(resources)};
     const MaterialModelLoadResult authored_exit{
         load_exit_chamber_asset(resources)};
+    const AuthoredMazeAssets authored_maze{
+        load_authored_maze_assets(resources)};
     const GeometryVector3& position{generation_.scene.start_camera_position_metres};
     const GeometryVector3& forward{generation_.scene.start_camera_forward};
     camera_.set_pose(
@@ -1191,7 +1467,7 @@ void Application::initialize()
 
     render_resources_ = std::make_unique<RenderResources>(
         resources, generation_.scene, authored_fire, authored_water, authored_earth,
-        authored_air, authored_aether, authored_start, authored_exit, exit_arch_,
+        authored_air, authored_aether, authored_start, authored_exit, authored_maze, exit_arch_,
         generation_.generation.effective_seed);
     if (profile_traversal_.has_value()) {
         apply_transition(game_session_.begin_exploration(GameClock::now()));
@@ -1747,6 +2023,8 @@ void Application::rebuild_run(const Seed requested_seed)
         load_start_chamber_asset(resource_root())};
     const MaterialModelLoadResult authored_exit{
         load_exit_chamber_asset(resource_root())};
+    const AuthoredMazeAssets authored_maze{
+        load_authored_maze_assets(resource_root())};
     CollisionWorld candidate_collision_world{
         build_collision_world(candidate_generation.scene)};
     append_authored_chamber_collision(
@@ -1789,6 +2067,7 @@ void Application::rebuild_run(const Seed requested_seed)
     auto candidate_resources{std::make_unique<RenderResources>(
         resource_root(), candidate_generation.scene, authored_fire, authored_water,
         authored_earth, authored_air, authored_aether, authored_start, authored_exit,
+        authored_maze,
         candidate_arch,
         candidate_generation.generation.effective_seed)};
 

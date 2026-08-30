@@ -12,6 +12,7 @@
 #include <set>
 #include <vector>
 
+#include "crystalbound/AuthoredTunnel.hpp"
 #include "crystalbound/CaveScene.hpp"
 #include "crystalbound/MazeGeneration.hpp"
 #include "crystalbound/PlayerController.hpp"
@@ -1124,6 +1125,61 @@ void generated_maze_authored_instances_follow_walls_and_thresholds(
     }
 }
 
+void authored_tunnel_assets_and_layout_cover_every_seam(
+    const std::filesystem::path& testdata_directory)
+{
+    const AuthoredTunnelAssets assets{
+        load_authored_tunnel_assets(testdata_directory)};
+    require(validate_authored_tunnel_assets(assets).empty(),
+        "authored tunnel source assets violate the runtime profile");
+
+    const CaveGenerationResult result{generate_cave({42U})};
+    const AuthoredTunnelLayout layout{
+        build_authored_tunnel_layout(result.scene)};
+    require(validate_authored_tunnel_layout(result.scene, layout).empty(),
+        "authored tunnel placements leave a route or chamber seam uncovered");
+    AuthoredTunnelLayout gapped_layout{layout};
+    require(!gapped_layout.segments.empty(),
+        "authored tunnel layout unexpectedly has no segment to mutate");
+    gapped_layout.segments.front().transform.translation_metres.x += 0.026;
+    require(!validate_authored_tunnel_layout(result.scene, gapped_layout).empty(),
+        "authored tunnel validation did not reject a deliberate 26 mm seam gap");
+    require(layout.entrances.size() == result.scene.portals.size(),
+        "authored tunnel entrances do not cover every portal");
+    const auto decoration_count = [&layout](const TunnelDecorationKind kind) {
+        return static_cast<std::size_t>(std::count_if(
+            layout.decorations.begin(), layout.decorations.end(),
+            [kind](const AuthoredTunnelDecorationInstance& instance) {
+                return instance.kind == kind;
+            }));
+    };
+    require(layout.decorations.size() >= layout.segments.size() * 2U,
+        "authored tunnels are too sparsely decorated for their length");
+    require(decoration_count(TunnelDecorationKind::pillar) >= 30U,
+        "authored tunnels need more repeating stone pillars");
+    require(decoration_count(TunnelDecorationKind::lantern) >= 16U,
+        "authored tunnels need more repeating lantern light fixtures");
+    require(decoration_count(TunnelDecorationKind::wood_support) >= 8U,
+        "authored tunnels need more repeating timber supports");
+    require(decoration_count(TunnelDecorationKind::rock)
+            + decoration_count(TunnelDecorationKind::broken_stones)
+        >= 20U,
+        "authored tunnels need more wall-side rock and rubble clusters");
+    for (const TunnelDecorationKind kind : {
+             TunnelDecorationKind::pillar,
+             TunnelDecorationKind::rock,
+             TunnelDecorationKind::broken_stones,
+             TunnelDecorationKind::lantern,
+             TunnelDecorationKind::puddle,
+             TunnelDecorationKind::wood_support}) {
+        require(std::any_of(layout.decorations.begin(), layout.decorations.end(),
+                    [kind](const AuthoredTunnelDecorationInstance& instance) {
+                        return instance.kind == kind;
+                    }),
+            "authored tunnel kit contains an unused decoration model");
+    }
+}
+
 }  // namespace
 
 std::vector<TestCase> cave_scene_test_cases()
@@ -1171,6 +1227,8 @@ std::vector<TestCase> cave_scene_test_cases()
             fixed_layout_inserts_exactly_five_maze_rooms},
         {"generated maze authored instances follow walls and thresholds",
             generated_maze_authored_instances_follow_walls_and_thresholds},
+        {"authored tunnel assets and layout cover every seam",
+            authored_tunnel_assets_and_layout_cover_every_seam},
     };
 }
 

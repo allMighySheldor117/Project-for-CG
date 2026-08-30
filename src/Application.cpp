@@ -33,6 +33,7 @@
 
 #include "crystalbound/CrystalCollection.hpp"
 #include "crystalbound/AuthoredChamber.hpp"
+#include "crystalbound/AuthoredTunnel.hpp"
 #include "crystalbound/GpuMesh.hpp"
 #include "crystalbound/GpuTexture.hpp"
 #include "crystalbound/MazeGeneration.hpp"
@@ -298,6 +299,39 @@ struct ImportedMaterialStyle {
     return {MaterialKind::untextured, batch.diffuse, batch.emission};
 }
 
+[[nodiscard]] ImportedMaterialStyle authored_tunnel_material_style(
+    const MaterialMeshBatch& batch)
+{
+    if (batch.material_name == "M_TunnelDark") {
+        return {MaterialKind::rock, {0.075F, 0.080F, 0.090F}, {0.0F, 0.0F, 0.0F}};
+    }
+    if (batch.material_name == "M_PathStone") {
+        return {MaterialKind::rock, {0.30F, 0.28F, 0.25F}, {0.0F, 0.0F, 0.0F}};
+    }
+    if (batch.material_name == "M_DryStackWall") {
+        return {MaterialKind::rock, {0.22F, 0.20F, 0.18F}, {0.0F, 0.0F, 0.0F}};
+    }
+    if (batch.material_name == "M_StoneLight") {
+        return {MaterialKind::rock, {0.39F, 0.36F, 0.31F}, {0.0F, 0.0F, 0.0F}};
+    }
+    if (batch.material_name == "M_Groove") {
+        return {MaterialKind::rock, {0.032F, 0.035F, 0.040F}, {0.0F, 0.0F, 0.0F}};
+    }
+    if (batch.material_name == "M_Bark") {
+        return {MaterialKind::wood_bark, {0.24F, 0.16F, 0.085F}, {0.0F, 0.0F, 0.0F}};
+    }
+    if (batch.material_name == "M_AgedIron") {
+        return {MaterialKind::untextured, {0.10F, 0.085F, 0.070F}, {0.0F, 0.0F, 0.0F}};
+    }
+    if (batch.material_name == "M_LampGlass") {
+        return {MaterialKind::untextured, {1.0F, 0.30F, 0.055F}, {1.0F, 0.18F, 0.03F}};
+    }
+    if (batch.material_name == "M_ClearStillWater") {
+        return {MaterialKind::deep_water, {0.045F, 0.23F, 0.30F}, {0.0F, 0.025F, 0.04F}};
+    }
+    return {MaterialKind::rock, batch.diffuse, batch.emission};
+}
+
 [[nodiscard]] MaterialModelLoadResult load_water_chamber_asset(
     const std::filesystem::path& resource_directory)
 {
@@ -513,6 +547,7 @@ public:
         const MaterialModelLoadResult& authored_start,
         const MaterialModelLoadResult& authored_exit,
         const AuthoredMazeAssets& authored_maze,
+        const AuthoredTunnelAssets& authored_tunnels,
         const ExitArchData& exit_arch,
         const Seed effective_seed)
         : shader_program_(
@@ -523,6 +558,18 @@ public:
     {
         elemental_visuals_ = scene.elemental_visuals;
         exit_arch_ = exit_arch;
+        const AuthoredTunnelLayout authored_tunnel_layout{
+            build_authored_tunnel_layout(scene)};
+        const std::vector<std::string> tunnel_layout_errors{
+            validate_authored_tunnel_layout(scene, authored_tunnel_layout)};
+        if (!tunnel_layout_errors.empty()) {
+            std::ostringstream message;
+            message << "Authored tunnel layout validation failed:";
+            for (const std::string& error : tunnel_layout_errors) {
+                message << "\n  - " << error;
+            }
+            throw std::runtime_error(message.str());
+        }
         const AuthoredChamberPlacement water_placement{
             water_chamber_placement(scene)};
         const AuthoredChamberPlacement fire_placement{
@@ -560,12 +607,15 @@ public:
             const bool replaced_by_authored_exit{
                 piece.owner_chamber_id == std::optional<NodeId>{
                     exit_placement.chamber_id}};
+            const bool replaced_by_authored_tunnel{
+                piece.kind == ScenePieceKind::tunnel
+                || piece.kind == ScenePieceKind::junction};
             const bool replaced_by_authored_maze_wall{
                 piece.kind == ScenePieceKind::maze_wall};
             if (replaced_by_authored_fire || replaced_by_authored_water || replaced_by_authored_earth
                 || replaced_by_authored_air || replaced_by_authored_aether
                 || replaced_by_authored_start || replaced_by_authored_exit
-                || replaced_by_authored_maze_wall) {
+                || replaced_by_authored_tunnel || replaced_by_authored_maze_wall) {
                 continue;
             }
             pieces_.push_back({piece.material, piece.albedo,
@@ -698,6 +748,20 @@ public:
                 static_cast<float>(placement.scale.y),
                 static_cast<float>(placement.scale.z),
             });
+        };
+        const auto tunnel_model = [](const TunnelTransform& transform) {
+            glm::mat4 model{1.0F};
+            model = glm::translate(model, {
+                static_cast<float>(transform.translation_metres.x),
+                static_cast<float>(transform.translation_metres.y),
+                static_cast<float>(transform.translation_metres.z)});
+            model = glm::rotate(model,
+                static_cast<float>(transform.yaw_radians),
+                {0.0F, 1.0F, 0.0F});
+            return glm::scale(model, {
+                static_cast<float>(transform.scale.x),
+                static_cast<float>(transform.scale.y),
+                static_cast<float>(transform.scale.z)});
         };
         const auto upload_authored = [](const MaterialModelLoadResult& source,
                                          std::vector<ImportedRenderPiece>& destination) {
@@ -859,6 +923,95 @@ public:
                 room_pieces);
             imported_maze_component_rooms_.push_back(std::move(room_pieces));
         }
+        std::vector<glm::mat4> tunnel_segment_models;
+        tunnel_segment_models.reserve(authored_tunnel_layout.segments.size());
+        for (const AuthoredTunnelSegmentInstance& instance
+             : authored_tunnel_layout.segments) {
+            tunnel_segment_models.push_back(tunnel_model(instance.transform));
+        }
+        std::vector<glm::mat4> tunnel_entrance_models;
+        tunnel_entrance_models.reserve(authored_tunnel_layout.entrances.size());
+        for (const AuthoredTunnelEntranceInstance& instance
+             : authored_tunnel_layout.entrances) {
+            tunnel_entrance_models.push_back(tunnel_model(instance.transform));
+        }
+        constexpr std::size_t tunnel_decoration_kind_count{6U};
+        std::array<std::vector<glm::mat4>, tunnel_decoration_kind_count>
+            tunnel_decoration_models;
+        for (const AuthoredTunnelDecorationInstance& instance
+             : authored_tunnel_layout.decorations) {
+            const std::size_t kind_index{static_cast<std::size_t>(instance.kind)};
+            if (kind_index >= tunnel_decoration_models.size()) {
+                throw std::runtime_error(
+                    "Authored tunnel layout returned an unknown decoration kind.");
+            }
+            tunnel_decoration_models[kind_index].push_back(
+                tunnel_model(instance.transform));
+        }
+        std::size_t authored_tunnel_baked_vertex_count{};
+        std::size_t authored_tunnel_baked_triangle_count{};
+        const auto upload_baked_tunnel = [
+            &authored_tunnel_baked_vertex_count,
+            &authored_tunnel_baked_triangle_count,
+            this](const MaterialModelLoadResult& source,
+                  const std::vector<glm::mat4>& models) {
+            if (models.empty()) {
+                return;
+            }
+            imported_tunnel_pieces_.reserve(
+                imported_tunnel_pieces_.size() + source.batches.size());
+            for (const MaterialMeshBatch& batch : source.batches) {
+                if (batch.mesh.vertices.size()
+                        > std::numeric_limits<std::size_t>::max() / models.size()
+                    || batch.mesh.indices.size()
+                        > std::numeric_limits<std::size_t>::max() / models.size()) {
+                    throw std::overflow_error(
+                        "Authored tunnel instance baking exceeds addressable memory.");
+                }
+                MeshData baked;
+                baked.vertices.reserve(batch.mesh.vertices.size() * models.size());
+                baked.indices.reserve(batch.mesh.indices.size() * models.size());
+                for (const glm::mat4& model : models) {
+                    if (baked.vertices.size()
+                        > std::numeric_limits<std::uint32_t>::max()
+                            - batch.mesh.vertices.size()) {
+                        throw std::overflow_error(
+                            "Authored tunnel batch exceeds 32-bit mesh indices.");
+                    }
+                    const auto vertex_offset{
+                        static_cast<std::uint32_t>(baked.vertices.size())};
+                    const glm::mat3 normal_matrix{
+                        glm::inverseTranspose(glm::mat3{model})};
+                    for (Vertex vertex : batch.mesh.vertices) {
+                        const glm::vec4 position{model * glm::vec4{
+                            vertex.position[0], vertex.position[1],
+                            vertex.position[2], 1.0F}};
+                        const glm::vec3 normal{glm::normalize(normal_matrix
+                            * glm::vec3{vertex.normal[0], vertex.normal[1],
+                                vertex.normal[2]})};
+                        vertex.position = {position.x, position.y, position.z};
+                        vertex.normal = {normal.x, normal.y, normal.z};
+                        baked.vertices.push_back(vertex);
+                    }
+                    for (const std::uint32_t index : batch.mesh.indices) {
+                        baked.indices.push_back(vertex_offset + index);
+                    }
+                }
+                const ImportedMaterialStyle style{
+                    authored_tunnel_material_style(batch)};
+                authored_tunnel_baked_vertex_count += baked.vertices.size();
+                authored_tunnel_baked_triangle_count += baked.indices.size() / 3U;
+                imported_tunnel_pieces_.push_back({style.kind, style.albedo,
+                    style.emission, std::make_unique<GpuMesh>(baked)});
+            }
+        };
+        upload_baked_tunnel(authored_tunnels.segment, tunnel_segment_models);
+        upload_baked_tunnel(authored_tunnels.entrance, tunnel_entrance_models);
+        for (std::size_t index{}; index < tunnel_decoration_models.size(); ++index) {
+            upload_baked_tunnel(authored_tunnel_decoration_asset(
+                authored_tunnels, static_cast<TunnelDecorationKind>(index)),
+                tunnel_decoration_models[index]);
+        }
         const MaterialModelLoadResult authored_elemental_crystal{
             load_elemental_crystal_asset(resource_directory)};
         if (authored_elemental_crystal.batches.size() != 1U) {
@@ -994,6 +1147,13 @@ public:
                                 MazeAuthoredModelKind::arch)].size();
                         })
                   << '/' << source_triangle_count(authored_maze.arch) << '\n';
+        std::cout << "Authored tunnels uploaded\n"
+                  << "  Segment tiles: " << authored_tunnel_layout.segments.size() << '\n'
+                  << "  Entrance collars: " << authored_tunnel_layout.entrances.size() << '\n'
+                  << "  Decorations: " << authored_tunnel_layout.decorations.size() << '\n'
+                  << "  Baked material batches: " << imported_tunnel_pieces_.size() << '\n'
+                  << "  Baked vertices: " << authored_tunnel_baked_vertex_count << '\n'
+                  << "  Baked triangles: " << authored_tunnel_baked_triangle_count << '\n';
     }
 
     void render(
@@ -1059,6 +1219,10 @@ public:
         set_model(glm::mat4{1.0F});
         for (const RenderPiece& piece : pieces_) {
             set_material(piece.material, piece.albedo, {0.0F, 0.0F, 0.0F}, 1.0F);
+            piece.mesh->draw();
+        }
+        for (const ImportedRenderPiece& piece : imported_tunnel_pieces_) {
+            set_material(piece.material, piece.albedo, piece.emission, 1.0F);
             piece.mesh->draw();
         }
         set_model(imported_fire_model_);
@@ -1299,6 +1463,7 @@ private:
     GpuTexture rock_texture_;
     GpuTexture wood_texture_;
     std::vector<RenderPiece> pieces_{};
+    std::vector<ImportedRenderPiece> imported_tunnel_pieces_{};
     glm::mat4 imported_fire_model_{1.0F};
     std::vector<ImportedRenderPiece> imported_fire_pieces_{};
     glm::mat4 imported_water_model_{1.0F};
@@ -1393,6 +1558,8 @@ void Application::initialize()
         load_exit_chamber_asset(resources)};
     const AuthoredMazeAssets authored_maze{
         load_authored_maze_assets(resources)};
+    const AuthoredTunnelAssets authored_tunnels{
+        load_authored_tunnel_assets(resources)};
     const GeometryVector3& position{generation_.scene.start_camera_position_metres};
     const GeometryVector3& forward{generation_.scene.start_camera_forward};
     camera_.set_pose(
@@ -1467,8 +1634,8 @@ void Application::initialize()
 
     render_resources_ = std::make_unique<RenderResources>(
         resources, generation_.scene, authored_fire, authored_water, authored_earth,
-        authored_air, authored_aether, authored_start, authored_exit, authored_maze, exit_arch_,
-        generation_.generation.effective_seed);
+        authored_air, authored_aether, authored_start, authored_exit, authored_maze,
+        authored_tunnels, exit_arch_, generation_.generation.effective_seed);
     if (profile_traversal_.has_value()) {
         apply_transition(game_session_.begin_exploration(GameClock::now()));
         movement_input_blocked_ = false;
@@ -2025,6 +2192,8 @@ void Application::rebuild_run(const Seed requested_seed)
         load_exit_chamber_asset(resource_root())};
     const AuthoredMazeAssets authored_maze{
         load_authored_maze_assets(resource_root())};
+    const AuthoredTunnelAssets authored_tunnels{
+        load_authored_tunnel_assets(resource_root())};
     CollisionWorld candidate_collision_world{
         build_collision_world(candidate_generation.scene)};
     append_authored_chamber_collision(
@@ -2067,8 +2236,7 @@ void Application::rebuild_run(const Seed requested_seed)
     auto candidate_resources{std::make_unique<RenderResources>(
         resource_root(), candidate_generation.scene, authored_fire, authored_water,
         authored_earth, authored_air, authored_aether, authored_start, authored_exit,
-        authored_maze,
-        candidate_arch,
+        authored_maze, authored_tunnels, candidate_arch,
         candidate_generation.generation.effective_seed)};
 
     generation_ = std::move(candidate_generation);

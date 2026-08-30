@@ -79,6 +79,7 @@ target_link_libraries(tinyobjloader_impl
 
 add_library(crystalbound_core STATIC
     src/AuthoredChamber.cpp
+    src/AuthoredTunnel.cpp
     src/Camera.cpp
     src/CaveGeneration.cpp
     src/CaveSceneFingerprint.cpp
@@ -305,6 +306,54 @@ if(CRYSTALBOUND_BUILD_TESTS)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/MazeArch.mtl"
                 "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/MazeArch.mtl"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/TunnelSegment.obj"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/TunnelSegment.obj"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/TunnelSegment.mtl"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/TunnelSegment.mtl"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/TunnelEntrance.obj"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/TunnelEntrance.obj"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/TunnelEntrance.mtl"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/TunnelEntrance.mtl"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/TunnelPillar.obj"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/TunnelPillar.obj"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/TunnelPillar.mtl"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/TunnelPillar.mtl"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/TunnelRockSmall.obj"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/TunnelRockSmall.obj"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/TunnelRockSmall.mtl"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/TunnelRockSmall.mtl"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/TunnelBrokenStones.obj"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/TunnelBrokenStones.obj"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/TunnelBrokenStones.mtl"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/TunnelBrokenStones.mtl"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/TunnelLantern.obj"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/TunnelLantern.obj"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/TunnelLantern.mtl"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/TunnelLantern.mtl"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/TunnelPuddle.obj"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/TunnelPuddle.obj"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/TunnelPuddle.mtl"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/TunnelPuddle.mtl"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/TunnelWoodSupport.obj"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/TunnelWoodSupport.obj"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models/TunnelWoodSupport.mtl"
+                "$<TARGET_FILE_DIR:crystalbound_tests>/testdata/TunnelWoodSupport.mtl"
        COMMENT "Copying Crystalbound test fixtures"
         VERBATIM
     )
